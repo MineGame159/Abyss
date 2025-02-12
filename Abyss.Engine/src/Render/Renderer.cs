@@ -46,9 +46,9 @@ public class Renderer : BaseSystem<World, float> {
             ],
             new DepthAttachment(Format.D32Sfloat, CompareOp.Less, true),
             ctx.Pipelines.GetLayout(
+                (uint) Utils.SizeOf<DrawData>(),
                 ctx.Descriptors.GetLayout(DescriptorType.UniformBuffer),
-                ctx.Descriptors.GetLayout(new DescriptorInfo(DescriptorType.ImageSampler, 128)),
-                ctx.Descriptors.GetLayout(DescriptorType.UniformBuffer)
+                ctx.Descriptors.GetLayout(new DescriptorInfo(DescriptorType.ImageSampler, 128))
             )
         ));
 
@@ -157,13 +157,13 @@ public class Renderer : BaseSystem<World, float> {
     private void RenderEntity(ref Transform transform, ref MeshInstance instance) {
         var mesh = GetMesh(instance.Mesh);
 
-        var uniforms = ctx.FrameAllocator.Allocate(BufferUsageFlags.UniformBufferBit, new MeshUniforms {
+        var data = new DrawData {
             Transform = transform.Matrix,
             Albedo = instance.Material.Albedo,
             AlbedoTextureI = GetTextureIndex(instance.Material.AlbedoMap)
-        });
+        };
 
-        commandBuffer.BindDescriptorSet(2, uniforms);
+        commandBuffer.PushConstants(data);
         commandBuffer.BindVertexBuffer(mesh.VertexBuffer);
 
         if (mesh.IndexBuffer != null) {
@@ -276,7 +276,7 @@ public class Renderer : BaseSystem<World, float> {
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct MeshUniforms {
+    private struct DrawData {
         public Matrix4x4 Transform;
         public Vector4 Albedo;
         public uint AlbedoTextureI;

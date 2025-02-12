@@ -4,7 +4,7 @@ struct FrameUniforms {
     float4x4 projectionView;
 }
 
-struct MeshUniforms {
+struct DrawData {
     float4x4 transform;
     float4 albedo;
     uint albedoTextureI;
@@ -16,8 +16,8 @@ uniform ConstantBuffer<FrameUniforms> frame;
 [vk_binding(0, 1)]
 uniform Sampler2D[] textures;
 
-[vk_binding(0, 2)]
-uniform ConstantBuffer<MeshUniforms> mesh;
+[vk_push_constant]
+DrawData draw;
 
 struct VertexIn {
     float3 pos;
@@ -33,7 +33,7 @@ struct VertexOut {
 VertexOut vertex(VertexIn in) {
     VertexOut out;
 
-    out.pos = mul(mul(frame.projectionView, mesh.transform), float4(in.pos, 1.0));
+    out.pos = mul(mul(frame.projectionView, draw.transform), float4(in.pos, 1.0));
     out.uv = in.uv;
 
     return out;
@@ -41,10 +41,10 @@ VertexOut vertex(VertexIn in) {
 
 [shader("fragment")]
 float4 fragment(float2 uv) {
-    var color = mesh.albedo;
+    var color = draw.albedo;
 
-    if (mesh.albedoTextureI != 0)
-        color *= textures[mesh.albedoTextureI - 1].Sample(uv);
+    if (draw.albedoTextureI != 0)
+        color *= textures[draw.albedoTextureI - 1].Sample(uv);
 
     if (color.a <= 0)
         discard;

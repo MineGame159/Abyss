@@ -34,6 +34,12 @@ public class GpuCommandBuffer {
         boundPipeline = pipeline;
     }
 
+    public unsafe void PushConstants<T>(in T data) where T : unmanaged {
+        fixed (T* ptr = &data) {
+            Ctx.Vk.CmdPushConstants(Handle, boundPipeline!.Layout, ShaderStageFlags.All, 0, (uint) Utils.SizeOf<T>(), ptr);
+        }
+    }
+
     public void BindDescriptorSet(uint index, DescriptorSet set, ReadOnlySpan<uint> offsets) {
         Ctx.Vk.CmdBindDescriptorSets(
             Handle,

@@ -14,9 +14,16 @@ public class GpuPipelineManager {
         this.ctx = ctx;
     }
 
-    public unsafe PipelineLayout GetLayout(params ReadOnlySpan<DescriptorSetLayout> setLayouts) {
+    public unsafe PipelineLayout GetLayout(uint pushConstantsSize, params ReadOnlySpan<DescriptorSetLayout> setLayouts) {
         if (!layouts.TryGetValue(setLayouts, out var layout)) {
+            var pushConstantsInfo = new PushConstantRange(
+                stageFlags: ShaderStageFlags.All,
+                size: pushConstantsSize
+            );
+
             VkUtils.Wrap(ctx.Vk.CreatePipelineLayout(ctx.Device, new PipelineLayoutCreateInfo(
+                pushConstantRangeCount: pushConstantsSize > 0 ? 1u : 0u,
+                pPushConstantRanges: &pushConstantsInfo,
                 setLayoutCount: (uint) setLayouts.Length,
                 pSetLayouts: Utils.AsPtr(setLayouts)
             ), null, out layout), "Failed to create a Pipeline Layout");
@@ -38,7 +45,7 @@ public class GpuPipelineManager {
                 setLayouts[i] = ctx.Descriptors.GetLayout(infos);
         }
 
-        return GetLayout(setLayouts);
+        return GetLayout(0, setLayouts);
     }
 
     public unsafe GpuGraphicsPipeline Create(GpuGraphicsPipelineOptions options) {
