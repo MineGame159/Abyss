@@ -7,7 +7,7 @@ namespace Abyss.Gpu;
 public class GpuDescriptorManager {
     private readonly GpuContext ctx;
 
-    private readonly MultiKeyDictionary<DescriptorType?, DescriptorSetLayout> layouts = new();
+    private readonly MultiKeyDictionary<DescriptorInfo?, DescriptorSetLayout> layouts = new();
 
     private readonly DescriptorPool pool;
     private readonly MultiKeyDictionary<IDescriptor?, DescriptorSet> sets = new(DescriptorEqualityComparer.Instance);
@@ -15,16 +15,12 @@ public class GpuDescriptorManager {
     public GpuDescriptorManager(GpuContext ctx) {
         this.ctx = ctx;
 
-        List<DescriptorPoolSize> poolSizes = [
-            new(DescriptorType.UniformBufferDynamic, 100),
-            new(DescriptorType.StorageBuffer, 100),
-            new(DescriptorType.StorageImage, 100),
-            new(DescriptorType.CombinedImageSampler, 100)
-        ];
+        var poolSizes = new List<DescriptorPoolSize>();
 
-        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
-        if (ctx.AccelStructApi != null) {
-            poolSizes.Add(new DescriptorPoolSize(DescriptorType.AccelerationStructureKhr, 100));
+        foreach (var type in Enum.GetValues<DescriptorType>()) {
+            if (type != DescriptorType.AccelStruct || ctx.AccelStructApi != null) {
+                poolSizes.Add(new DescriptorPoolSize(type.Vk(), 100));
+            }
         }
 
         unsafe {
@@ -50,42 +46,60 @@ public class GpuDescriptorManager {
         }
     }
 
-    public unsafe DescriptorSetLayout GetLayout(ReadOnlySpan<DescriptorType?> types) {
-        if (!layouts.TryGetValue(types, out var layout)) {
-            Span<DescriptorSetLayoutBinding> bindings = stackalloc DescriptorSetLayoutBinding[types.Length];
+    public unsafe DescriptorSetLayout GetLayout(params ReadOnlySpan<DescriptorInfo?> infos) {
+        if (!layouts.TryGetValue(infos, out var layout)) {
+            Span<DescriptorSetLayoutBinding> bindings = stackalloc DescriptorSetLayoutBinding[infos.Length];
+            Span<DescriptorBindingFlags> flags = stackalloc DescriptorBindingFlags[infos.Length];
+            var hasArray = false;
 
-            for (var i = 0; i < types.Length; i++) {
-                var type = types[i];
+            for (var i = 0; i < infos.Length; i++) {
+                var info = infos[i];
+
+                if (info is { Count: < 1 })
+                    throw new Exception("Invalid descriptor count");
+
+                if (info is { Count: > 1 }) {
+                    flags[i] = DescriptorBindingFlags.UpdateAfterBindBit | DescriptorBindingFlags.PartiallyBoundBit;
+                    hasArray = true;
+                }
 
                 bindings[i] = new DescriptorSetLayoutBinding(
                     (uint) i,
-                    type ?? 0,
-                    type == null ? 0u : 1u,
+                    info?.Type.Vk() ?? 0,
+                    (uint) (info?.Count ?? 1),
                     ShaderStageFlags.All
                 );
             }
 
+            var flagInfo = new DescriptorSetLayoutBindingFlagsCreateInfo(
+                bindingCount: (uint) flags.Length,
+                pBindingFlags: Utils.AsPtr(flags)
+            );
+
             VkUtils.Wrap(ctx.Vk.CreateDescriptorSetLayout(ctx.Device, new DescriptorSetLayoutCreateInfo(
+                pNext: &flagInfo,
+                flags: hasArray ? DescriptorSetLayoutCreateFlags.UpdateAfterBindPoolBit : DescriptorSetLayoutCreateFlags.None,
                 bindingCount: (uint) bindings.Length,
                 pBindings: Utils.AsPtr(bindings)
             ), null, out layout), "Failed to create a Descriptor Set Layout");
 
-            layouts[types] = layout;
+            layouts[infos] = layout;
         }
 
         return layout;
     }
 
-    public DescriptorSetLayout GetLayout(ReadOnlySpan<IDescriptor?> descriptors) {
-        Span<DescriptorType?> types = stackalloc DescriptorType?[descriptors.Length];
+    public DescriptorSetLayout GetLayout(params ReadOnlySpan<IDescriptor?> descriptors) {
+        Span<DescriptorInfo?> infos = stackalloc DescriptorInfo?[descriptors.Length];
 
-        for (var i = 0; i < types.Length; i++) types[i] = descriptors[i]?.DescriptorType;
+        for (var i = 0; i < infos.Length; i++)
+            infos[i] = descriptors[i]?.DescriptorInfo;
 
-        return GetLayout(types);
+        return GetLayout(infos);
     }
 
     [SuppressMessage("ReSharper", "StackAllocInsideLoop")]
-    public unsafe DescriptorSet GetSet(ReadOnlySpan<IDescriptor?> descriptors) {
+    public unsafe DescriptorSet GetSet(params ReadOnlySpan<IDescriptor?> descriptors) {
         if (!sets.TryGetValue(descriptors, out var set)) {
             var layout = GetLayout(descriptors);
 
@@ -108,7 +122,7 @@ public class GpuDescriptorManager {
                     dstSet: set,
                     dstBinding: (uint) i,
                     descriptorCount: 1,
-                    descriptorType: descriptor.DescriptorType
+                    descriptorType: descriptor.DescriptorInfo.Type.Vk()
                 );
 
                 switch (descriptors[i++]) {
@@ -142,12 +156,12 @@ public class GpuDescriptorManager {
                         write.PImageInfo = info;
                         break;
                     }
-                    case GpuSamplerImage samplerImage: {
+                    case GpuImageSampler imageSampler: {
                         var info = stackalloc DescriptorImageInfo[1];
                         *info = new DescriptorImageInfo(
-                            imageView: samplerImage.Image,
+                            imageView: imageSampler.Image,
                             imageLayout: ImageLayout.ShaderReadOnlyOptimal,
-                            sampler: samplerImage.Sampler
+                            sampler: imageSampler.Sampler
                         );
 
                         write.PImageInfo = info;
@@ -166,10 +180,13 @@ public class GpuDescriptorManager {
                         write.PNext = info;
                         break;
                     }
+                    default: {
+                        throw new Exception("Invalid descriptor");
+                    }
                 }
             }
 
-            ctx.Vk.UpdateDescriptorSets(ctx.Device, (uint) writes.Length, Utils.AsPtr(writes), 0, null);
+            ctx.Vk.UpdateDescriptorSets(ctx.Device, (uint) i, Utils.AsPtr(writes), 0, null);
 
             sets[descriptors] = set;
         }

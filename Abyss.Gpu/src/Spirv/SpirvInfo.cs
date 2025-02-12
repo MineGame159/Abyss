@@ -13,5 +13,5 @@ public class SpirvInfo {
 
     public readonly record struct EntryPoint(ShaderStageFlags Stage, string Name);
 
-    public readonly record struct Binding(uint Set, uint Index, DescriptorType Type);
+    public readonly record struct Binding(uint Set, uint Index, DescriptorInfo Info);
 }

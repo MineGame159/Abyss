@@ -16,6 +16,10 @@ public class Program : Application {
     protected override void Init() {
         var model = Model.Load("models/fantasy_game_inn.glb");
         model.Spawn(World, new Transform());
+        
+        Console.WriteLine("Entities: " + model.Entities.Count);
+        Console.WriteLine("Meshes: " + model.Entities.Select(tuple => tuple.Item2.Mesh).Distinct().Count());
+        Console.WriteLine("Materials: " + model.Entities.Select(tuple => tuple.Item2.Material).Distinct().Count());
 
         camera = World.Create(
             new Transform {

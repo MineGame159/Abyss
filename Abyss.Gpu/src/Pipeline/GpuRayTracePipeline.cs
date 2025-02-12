@@ -16,7 +16,8 @@ public class GpuRayTracePipeline : GpuPipeline {
 public readonly record struct GpuRayTracePipelineOptions(
     GpuShaderModule[] ShaderModules,
     GpuRayTraceGroup[] ShaderGroups,
-    uint MaxRecursionDepth
+    uint MaxRecursionDepth,
+    PipelineLayout? Layout = null
 );
 
 public readonly record struct GpuRayTraceGroup(

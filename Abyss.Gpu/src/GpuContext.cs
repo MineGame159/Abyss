@@ -480,7 +480,10 @@ public class GpuContext {
             hostQueryReset: true,
             bufferDeviceAddress: true,
             shaderInt8: true,
-            storageBuffer8BitAccess: true
+            storageBuffer8BitAccess: true,
+            runtimeDescriptorArray: true,
+            descriptorBindingSampledImageUpdateAfterBind: true,
+            descriptorBindingPartiallyBound: true
         );
 
         var features = new PhysicalDeviceFeatures2(

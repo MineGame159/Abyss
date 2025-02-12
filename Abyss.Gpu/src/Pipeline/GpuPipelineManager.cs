@@ -14,7 +14,7 @@ public class GpuPipelineManager {
         this.ctx = ctx;
     }
 
-    public unsafe PipelineLayout GetLayout(ReadOnlySpan<DescriptorSetLayout> setLayouts) {
+    public unsafe PipelineLayout GetLayout(params ReadOnlySpan<DescriptorSetLayout> setLayouts) {
         if (!layouts.TryGetValue(setLayouts, out var layout)) {
             VkUtils.Wrap(ctx.Vk.CreatePipelineLayout(ctx.Device, new PipelineLayoutCreateInfo(
                 setLayoutCount: (uint) setLayouts.Length,
@@ -27,15 +27,15 @@ public class GpuPipelineManager {
         return layout;
     }
 
-    private PipelineLayout GetLayout(ShaderModuleInfo[] infos) {
-        var setTypes = MergeBindings(infos);
-        Span<DescriptorSetLayout> setLayouts = stackalloc DescriptorSetLayout[setTypes.Length];
+    private PipelineLayout GetLayout(ShaderModuleInfo[] shaderInfos) {
+        var setInfos = MergeBindings(shaderInfos);
+        Span<DescriptorSetLayout> setLayouts = stackalloc DescriptorSetLayout[setInfos.Length];
 
-        for (var i = 0; i < setTypes.Length; i++) {
-            var types = setTypes[i];
+        for (var i = 0; i < setInfos.Length; i++) {
+            var infos = setInfos[i];
 
-            if (types != null)
-                setLayouts[i] = ctx.Descriptors.GetLayout(types);
+            if (infos != null)
+                setLayouts[i] = ctx.Descriptors.GetLayout(infos);
         }
 
         return GetLayout(setLayouts);
@@ -143,7 +143,8 @@ public class GpuPipelineManager {
 
         Span<Format> colorAttachmentFormats = stackalloc Format[options.ColorAttachments.Length];
 
-        for (var i = 0; i < colorAttachmentFormats.Length; i++) colorAttachmentFormats[i] = options.ColorAttachments[i].Format;
+        for (var i = 0; i < colorAttachmentFormats.Length; i++)
+            colorAttachmentFormats[i] = options.ColorAttachments[i].Format;
 
         var renderingInfo = new PipelineRenderingCreateInfo(
             colorAttachmentCount: (uint) colorAttachmentFormats.Length,
@@ -151,7 +152,7 @@ public class GpuPipelineManager {
             depthAttachmentFormat: options.DepthAttachment?.Format ?? Format.Undefined
         );
 
-        var layout = GetLayout(shaderInfos.Values.ToArray());
+        var layout = options.Layout ?? GetLayout(shaderInfos.Values.ToArray());
 
         VkUtils.Wrap(ctx.Vk.CreateGraphicsPipelines(ctx.Device, new PipelineCache(), 1, new GraphicsPipelineCreateInfo(
             pNext: &renderingInfo,
@@ -168,9 +169,11 @@ public class GpuPipelineManager {
             layout: layout
         ), null, out var handle), "Failed to create a Graphics Pipeline");
 
-        foreach (var shaderStage in shaderStages) SilkMarshal.FreeString((IntPtr) shaderStage.PName);
+        foreach (var shaderStage in shaderStages)
+            SilkMarshal.FreeString((IntPtr) shaderStage.PName);
 
-        foreach (var info in shaderInfos.Values) ctx.Vk.DestroyShaderModule(ctx.Device, info.Handle, null);
+        foreach (var info in shaderInfos.Values)
+            ctx.Vk.DestroyShaderModule(ctx.Device, info.Handle, null);
 
         return new GpuGraphicsPipeline(ctx, layout, handle, options);
     }
@@ -178,7 +181,8 @@ public class GpuPipelineManager {
     public unsafe GpuRayTracePipeline Create(GpuRayTracePipelineOptions options) {
         var shaderInfos = new Dictionary<GpuShaderModule, ShaderModuleInfo>();
 
-        foreach (var shaderModule in options.ShaderModules) CreateShaderModuleInfo(shaderModule, shaderInfos);
+        foreach (var shaderModule in options.ShaderModules)
+            CreateShaderModuleInfo(shaderModule, shaderInfos);
 
         Span<PipelineShaderStageCreateInfo> shaderStages = stackalloc PipelineShaderStageCreateInfo[options.ShaderModules.Length];
 
@@ -201,7 +205,7 @@ public class GpuPipelineManager {
             );
         }
 
-        var layout = GetLayout(shaderInfos.Values.ToArray());
+        var layout = options.Layout ?? GetLayout(shaderInfos.Values.ToArray());
 
         VkUtils.Wrap(ctx.RayTracingApi.CreateRayTracingPipelines(ctx.Device, new DeferredOperationKHR(), new PipelineCache(), 1,
             new RayTracingPipelineCreateInfoKHR(
@@ -213,20 +217,22 @@ public class GpuPipelineManager {
                 layout: layout
             ), null, out var handle), "Failed to create a Ray Trace Pipeline");
 
-        foreach (var shaderStage in shaderStages) SilkMarshal.FreeString((IntPtr) shaderStage.PName);
+        foreach (var shaderStage in shaderStages)
+            SilkMarshal.FreeString((IntPtr) shaderStage.PName);
 
-        foreach (var info in shaderInfos.Values) ctx.Vk.DestroyShaderModule(ctx.Device, info.Handle, null);
+        foreach (var info in shaderInfos.Values)
+            ctx.Vk.DestroyShaderModule(ctx.Device, info.Handle, null);
 
         return new GpuRayTracePipeline(ctx, layout, handle, options);
     }
 
-    private static DescriptorType?[]?[] MergeBindings(ShaderModuleInfo[] shaderInfos) {
+    private static DescriptorInfo?[]?[] MergeBindings(ShaderModuleInfo[] shaderInfos) {
         var setCount = shaderInfos
             .SelectMany(info => info.Spirv.Bindings)
             .Select(binding => binding.Set)
             .Max() + 1;
 
-        var setTypes = new DescriptorType?[]?[setCount];
+        var setInfos = new DescriptorInfo?[]?[setCount];
 
         for (var i = 0; i < setCount; i++) {
             var setI = i;
@@ -237,19 +243,19 @@ public class GpuPipelineManager {
                 .Select(binding => binding.Index)
                 .Max() + 1;
 
-            var types = new DescriptorType?[count];
+            var infos = new DescriptorInfo?[count];
 
             foreach (var binding in shaderInfos.SelectMany(info => info.Spirv.Bindings).Where(binding => binding.Set == setI)) {
-                if (types[binding.Index] != null && types[binding.Index] != binding.Type)
+                if (infos[binding.Index] != null && infos[binding.Index] != binding.Info)
                     throw new Exception("Incompatible descriptor type between shaders");
 
-                types[binding.Index] = binding.Type;
+                infos[binding.Index] = binding.Info;
             }
 
-            setTypes[setI] = types;
+            setInfos[setI] = infos;
         }
 
-        return setTypes;
+        return setInfos;
     }
 
     private unsafe void CreateShaderModuleInfo(GpuShaderModule shaderModule, Dictionary<GpuShaderModule, ShaderModuleInfo> infos) {

@@ -8,9 +8,9 @@ using Abyss.Gpu.Pipeline;
 using Arch.Core;
 using Arch.Core.Extensions;
 using Arch.System;
-using Silk.NET.Maths;
 using Silk.NET.Vulkan;
 using VMASharp;
+using DescriptorType = Abyss.Gpu.DescriptorType;
 
 namespace Abyss.Engine.Render;
 
@@ -22,8 +22,8 @@ public class Renderer : BaseSystem<World, float> {
 
     private readonly GpuGraphicsPipeline pipeline;
     private readonly Dictionary<IMesh, Mesh> meshes = [];
-    private readonly Dictionary<ITexture, GpuImage> images = [];
-    private GpuImage? whiteImage;
+    private readonly GpuTextureArray textures;
+    private readonly Dictionary<ITexture, uint> textureIndices = [];
     private readonly Sampler sampler;
 
     private GpuCommandBuffer commandBuffer = null!;
@@ -44,8 +44,15 @@ public class Renderer : BaseSystem<World, float> {
             [
                 new ColorAttachment(ctx.Swapchain.Images[0].Format, true)
             ],
-            new DepthAttachment(Format.D32Sfloat, CompareOp.Less, true)
+            new DepthAttachment(Format.D32Sfloat, CompareOp.Less, true),
+            ctx.Pipelines.GetLayout(
+                ctx.Descriptors.GetLayout(DescriptorType.UniformBuffer),
+                ctx.Descriptors.GetLayout(new DescriptorInfo(DescriptorType.ImageSampler, 128)),
+                ctx.Descriptors.GetLayout(DescriptorType.UniformBuffer)
+            )
         ));
+
+        textures = new GpuTextureArray(ctx, 128);
 
         sampler = ctx.CreateSampler(Filter.Linear, Filter.Linear, SamplerAddressMode.Repeat);
     }
@@ -92,7 +99,9 @@ public class Renderer : BaseSystem<World, float> {
         commandBuffer.BindPipeline(pipeline);
 
         var frameUniforms = UploadFrameUniforms();
-        commandBuffer.BindDescriptorSet(0, [frameUniforms]);
+
+        commandBuffer.BindDescriptorSet(0, frameUniforms);
+        commandBuffer.BindDescriptorSet(1, textures.Set, ReadOnlySpan<uint>.Empty);
 
         World.Query<Transform, MeshInstance>(renderEntityDesc, RenderEntity);
 
@@ -150,11 +159,11 @@ public class Renderer : BaseSystem<World, float> {
 
         var uniforms = ctx.FrameAllocator.Allocate(BufferUsageFlags.UniformBufferBit, new MeshUniforms {
             Transform = transform.Matrix,
-            Albedo = instance.Material.Albedo.Float
+            Albedo = instance.Material.Albedo,
+            AlbedoTextureI = GetTextureIndex(instance.Material.AlbedoMap)
         });
 
-        commandBuffer.BindDescriptorSet(1, [new GpuSamplerImage(GetImage(instance.Material.AlbedoMap), sampler)]);
-        commandBuffer.BindDescriptorSet(2, [uniforms]);
+        commandBuffer.BindDescriptorSet(2, uniforms);
         commandBuffer.BindVertexBuffer(mesh.VertexBuffer);
 
         if (mesh.IndexBuffer != null) {
@@ -182,23 +191,11 @@ public class Renderer : BaseSystem<World, float> {
         return mesh;
     }
 
-    private GpuImage GetImage(ITexture? asset) {
-        if (asset == null) {
-            if (whiteImage == null) {
-                whiteImage = ctx.CreateImage(
-                    Vector2D<uint>.One,
-                    ImageUsageFlags.SampledBit | ImageUsageFlags.TransferDstBit,
-                    Format.R8G8B8A8Unorm
-                );
+    private uint GetTextureIndex(ITexture? asset) {
+        if (asset == null)
+            return 0;
 
-                var white = new Rgba(255, 255, 255, 255);
-                GpuSyncUploads.UploadToImage(MemoryMarshal.Cast<Rgba, byte>(new ReadOnlySpan<Rgba>(ref white)), whiteImage);
-            }
-
-            return whiteImage;
-        }
-
-        if (!images.TryGetValue(asset, out var image)) {
+        if (!textureIndices.TryGetValue(asset, out var index)) {
             var uploadBuffer = ctx.CreateBuffer(
                 asset.Size.X * asset.Size.Y * Utils.SizeOf<Rgba>(),
                 BufferUsageFlags.TransferSrcBit,
@@ -209,7 +206,7 @@ public class Renderer : BaseSystem<World, float> {
             asset.Write(data);
             uploadBuffer.Unmap();
 
-            image = ctx.CreateImage(
+            var image = ctx.CreateImage(
                 asset.Size,
                 ImageUsageFlags.SampledBit | ImageUsageFlags.TransferDstBit,
                 Format.R8G8B8A8Unorm
@@ -236,10 +233,11 @@ public class Renderer : BaseSystem<World, float> {
 
             uploadBuffer.Dispose();
 
-            images[asset] = image;
+            index = textures.Add(image, sampler);
+            textureIndices[asset] = index;
         }
 
-        return image;
+        return index;
     }
 
     private GpuBuffer CreateBuffer<T>(uint count, Action<Span<T>> writer) where T : unmanaged {
@@ -281,6 +279,7 @@ public class Renderer : BaseSystem<World, float> {
     private struct MeshUniforms {
         public Matrix4x4 Transform;
         public Vector4 Albedo;
+        public uint AlbedoTextureI;
     }
 
     private class Mesh {

@@ -26,7 +26,7 @@ public class GpuAccelStruct : GpuResource, IDescriptor {
 
     // IDescriptor
 
-    public DescriptorType DescriptorType => DescriptorType.AccelerationStructureKhr;
+    public DescriptorInfo DescriptorInfo => DescriptorType.AccelStruct;
 
     public bool DescriptorEquals(IDescriptor other) {
         return Equals(other);

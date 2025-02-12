@@ -4,7 +4,7 @@ using Arch.Core;
 namespace Abyss.Engine.Assets;
 
 public class Model {
-    internal List<(Transform, MeshInstance)> Entities = [];
+    public readonly List<(Transform, MeshInstance)> Entities = [];
 
     internal Model() { }
 

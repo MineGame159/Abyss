@@ -1,6 +1,5 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Silk.NET.Vulkan;
 
 namespace Abyss.Gpu.Spirv;
 
@@ -83,27 +82,27 @@ public static class SpirvParser {
             if (binding.Set == null) Error("binding doesn't have Descriptor Set index");
             if (binding.Index == null) Error("binding doesn't have Binding index");
 
-            var type = GetBindingType(producedBy, binding);
-            bindings.Add(new SpirvInfo.Binding(binding.Set!.Value, binding.Index!.Value, type));
+            var info = GetBindingInfo(producedBy, binding);
+            bindings.Add(new SpirvInfo.Binding(binding.Set!.Value, binding.Index!.Value, info));
         }
 
         return new SpirvInfo(entryPoints.ToArray(), bindings.ToArray());
     }
 
-    private static DescriptorType GetBindingType(Dictionary<uint, OpUnknown> producedBy, SpirvBinding binding) {
+    private static DescriptorInfo GetBindingInfo(Dictionary<uint, OpUnknown> producedBy, SpirvBinding binding) {
         if (producedBy[binding.Id].Type != OpVariable.Id) Error("OpDecorate isn't OpVariable");
         var var = new OpVariable(producedBy[binding.Id]);
 
         if (producedBy[var.ResultType].Type != OpTypePointer.Id) Error("OpVariable doesn't have OpTypePointer");
         var ptr = new OpTypePointer(producedBy[var.ResultType]);
 
-        var type = ptr.StorageClass switch {
-            SpirvStorageClass.Uniform => DescriptorType.UniformBufferDynamic,
+        var info = ptr.StorageClass switch {
+            SpirvStorageClass.Uniform => DescriptorType.UniformBuffer,
             SpirvStorageClass.StorageBuffer => DescriptorType.StorageBuffer,
-            _ => default(DescriptorType?)
+            _ => default(DescriptorInfo?)
         };
 
-        if (type == null)
+        if (info == null)
             switch (producedBy[ptr.Type].Type) {
                 case OpTypeSampledImage.Id: {
                     var sampledImg = new OpTypeSampledImage(producedBy[ptr.Type]);
@@ -111,7 +110,8 @@ public static class SpirvParser {
                     if (producedBy[sampledImg.Type].Type == OpTypeImage.Id) {
                         var img = new OpTypeImage(producedBy[sampledImg.Type]);
 
-                        if (img.Sampled == 1) type = DescriptorType.CombinedImageSampler;
+                        if (img.Sampled == 1)
+                            info = DescriptorType.ImageSampler;
                     }
 
                     break;
@@ -119,17 +119,47 @@ public static class SpirvParser {
                 case OpTypeImage.Id: {
                     var img = new OpTypeImage(producedBy[ptr.Type]);
 
-                    if (img.Sampled == 2) type = DescriptorType.StorageImage;
+                    if (img.Sampled == 2)
+                        info = DescriptorType.StorageImage;
+
+                    break;
+                }
+                case OpTypeRuntimeArray.Id: {
+                    var array = new OpTypeRuntimeArray(producedBy[ptr.Type]);
+
+                    switch (producedBy[array.Type].Type) {
+                        case OpTypeSampledImage.Id: {
+                            var sampledImg = new OpTypeSampledImage(producedBy[array.Type]);
+
+                            if (producedBy[sampledImg.Type].Type == OpTypeImage.Id) {
+                                var img = new OpTypeImage(producedBy[sampledImg.Type]);
+
+                                if (img.Sampled == 1)
+                                    info = new DescriptorInfo(DescriptorType.ImageSampler, -1);
+                            }
+
+                            break;
+                        }
+                        case OpTypeImage.Id: {
+                            var img = new OpTypeImage(producedBy[array.Type]);
+
+                            if (img.Sampled == 2)
+                                info = new DescriptorInfo(DescriptorType.StorageImage, -1);
+
+                            break;
+                        }
+                    }
 
                     break;
                 }
                 case OpTypeAccelerationStructure.Id: {
-                    type = DescriptorType.AccelerationStructureKhr;
+                    info = DescriptorType.AccelStruct;
                     break;
                 }
             }
 
-        if (type != null) return type.Value;
+        if (info != null)
+            return info.Value;
 
         Error("invalid descriptor type");
         return default;

@@ -22,11 +22,11 @@ public class GpuBuffer : GpuResource, IDescriptor {
 
     // IDescriptor
 
-    public DescriptorType DescriptorType {
+    public DescriptorInfo DescriptorInfo {
         get {
-            if (Usage.HasFlag(BufferUsageFlags.UniformBufferBit)) return DescriptorType.UniformBufferDynamic;
+            if (Usage.HasFlag(BufferUsageFlags.UniformBufferBit)) return DescriptorType.UniformBuffer;
             if (Usage.HasFlag(BufferUsageFlags.StorageBufferBit)) return DescriptorType.StorageBuffer;
-
+    
             throw new Exception($"Buffer with {Usage} usage cannot be a descriptor");
         }
     }
@@ -88,7 +88,7 @@ public class GpuBuffer : GpuResource, IDescriptor {
 public readonly record struct GpuSubBuffer(GpuBuffer Buffer, ulong Offset, ulong Size) : IDescriptor {
     // IDescriptor
 
-    public DescriptorType DescriptorType => Buffer.DescriptorType;
+    public DescriptorInfo DescriptorInfo => Buffer.DescriptorInfo;
 
     public bool DescriptorEquals(IDescriptor other) {
         if (other is GpuSubBuffer subBuffer) return Buffer == subBuffer.Buffer && Size == subBuffer.Size;

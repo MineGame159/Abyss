@@ -19,7 +19,8 @@ public readonly record struct GpuGraphicsPipelineOptions(
     GpuShaderModule FragmentShader,
     VertexFormat Format,
     ColorAttachment[] ColorAttachments,
-    DepthAttachment? DepthAttachment = null
+    DepthAttachment? DepthAttachment = null,
+    PipelineLayout? Layout = null
 );
 
 public readonly record struct ColorAttachment(Format Format, bool Blend);

@@ -46,7 +46,7 @@ public class GpuImage : GpuResource, IDescriptor {
 
     // IDescriptor
 
-    public DescriptorType DescriptorType => DescriptorType.StorageImage;
+    public DescriptorInfo DescriptorInfo => DescriptorType.StorageImage;
 
     public bool DescriptorEquals(IDescriptor other) {
         return Equals(other);
@@ -80,10 +80,10 @@ public class GpuImage : GpuResource, IDescriptor {
     }
 }
 
-public readonly record struct GpuSamplerImage(GpuImage Image, Sampler Sampler) : IDescriptor {
+public readonly record struct GpuImageSampler(GpuImage Image, Sampler Sampler) : IDescriptor {
     // IDescriptor
 
-    public DescriptorType DescriptorType => DescriptorType.CombinedImageSampler;
+    public DescriptorInfo DescriptorInfo => DescriptorType.ImageSampler;
 
     public bool DescriptorEquals(IDescriptor other) {
         return Equals(other);

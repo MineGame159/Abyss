@@ -7,13 +7,14 @@ struct FrameUniforms {
 struct MeshUniforms {
     float4x4 transform;
     float4 albedo;
+    uint albedoTextureI;
 }
 
 [vk_binding(0, 0)]
 uniform ConstantBuffer<FrameUniforms> frame;
 
 [vk_binding(0, 1)]
-uniform Sampler2D albedoMap;
+uniform Sampler2D[] textures;
 
 [vk_binding(0, 2)]
 uniform ConstantBuffer<MeshUniforms> mesh;
@@ -40,7 +41,10 @@ VertexOut vertex(VertexIn in) {
 
 [shader("fragment")]
 float4 fragment(float2 uv) {
-    let color = albedoMap.Sample(uv) * mesh.albedo;
+    var color = mesh.albedo;
+
+    if (mesh.albedoTextureI != 0)
+        color *= textures[mesh.albedoTextureI - 1].Sample(uv);
 
     if (color.a <= 0)
         discard;

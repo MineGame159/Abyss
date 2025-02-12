@@ -45,13 +45,13 @@ public class GpuCommandBuffer {
         );
     }
 
-    public void BindDescriptorSet(uint index, ReadOnlySpan<IDescriptor?> descriptors) {
+    public void BindDescriptorSet(uint index, params ReadOnlySpan<IDescriptor?> descriptors) {
         // Offsets
 
         var offsetCount = 0;
 
         foreach (var descriptor in descriptors)
-            if (descriptor?.DescriptorType == DescriptorType.UniformBufferDynamic)
+            if (descriptor?.DescriptorInfo.Type == DescriptorType.UniformBuffer)
                 offsetCount++;
 
         Span<uint> offsets = stackalloc uint[offsetCount];
@@ -59,10 +59,10 @@ public class GpuCommandBuffer {
 
         foreach (var descriptor in descriptors)
             switch (descriptor) {
-                case GpuBuffer { DescriptorType: DescriptorType.UniformBufferDynamic }:
+                case GpuBuffer { DescriptorInfo.Type: DescriptorType.UniformBuffer }:
                     offsets[i++] = 0;
                     break;
-                case GpuSubBuffer { DescriptorType: DescriptorType.UniformBufferDynamic } subBuffer:
+                case GpuSubBuffer { DescriptorInfo.Type: DescriptorType.UniformBuffer } subBuffer:
                     offsets[i++] = (uint) subBuffer.Offset;
                     break;
             }
