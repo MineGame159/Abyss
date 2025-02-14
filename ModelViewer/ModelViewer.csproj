@@ -11,4 +11,8 @@
       <ProjectReference Include="..\Abyss.Engine\Abyss.Engine.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+      <Folder Include="models\" />
+    </ItemGroup>
+
 </Project>

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Abyss.Core;
@@ -8,6 +9,7 @@ using Abyss.Gpu.Pipeline;
 using Arch.Core;
 using Arch.Core.Extensions;
 using Arch.System;
+using Silk.NET.Maths;
 using Silk.NET.Vulkan;
 using VMASharp;
 using DescriptorType = Abyss.Gpu.DescriptorType;
@@ -21,9 +23,15 @@ public class Renderer : BaseSystem<World, float> {
     private readonly GpuContext ctx;
 
     private readonly GpuGraphicsPipeline pipeline;
+
     private readonly Dictionary<IMesh, Mesh> meshes = [];
+
+    private readonly GrowableStorageBuffer<GpuMaterial> materials;
+    private readonly Dictionary<Material, uint> materialIndices = [];
+
     private readonly GpuTextureArray textures;
     private readonly Dictionary<ITexture, uint> textureIndices = [];
+
     private readonly Sampler sampler;
 
     private GpuCommandBuffer commandBuffer = null!;
@@ -39,7 +47,8 @@ public class Renderer : BaseSystem<World, float> {
             GpuShaderModule.FromResource("Abyss.Engine.shaders.bin.mesh.spv"),
             new VertexFormat([
                 new VertexAttribute(VertexAttributeType.Float, 3, false),
-                new VertexAttribute(VertexAttributeType.Float, 2, false)
+                new VertexAttribute(VertexAttributeType.Float, 2, false),
+                new VertexAttribute(VertexAttributeType.Float, 3, false)
             ]),
             [
                 new ColorAttachment(ctx.Swapchain.Images[0].Format, true)
@@ -47,10 +56,12 @@ public class Renderer : BaseSystem<World, float> {
             new DepthAttachment(Format.D32Sfloat, CompareOp.Less, true),
             ctx.Pipelines.GetLayout(
                 (uint) Utils.SizeOf<DrawData>(),
-                ctx.Descriptors.GetLayout(DescriptorType.UniformBuffer),
+                ctx.Descriptors.GetLayout(DescriptorType.UniformBuffer, DescriptorType.StorageBuffer),
                 ctx.Descriptors.GetLayout(new DescriptorInfo(DescriptorType.ImageSampler, 128))
             )
         ));
+
+        materials = new GrowableStorageBuffer<GpuMaterial>(ctx, 128);
 
         textures = new GpuTextureArray(ctx, 128);
 
@@ -89,18 +100,23 @@ public class Renderer : BaseSystem<World, float> {
             AccessFlags.DepthStencilAttachmentReadBit | AccessFlags.DepthStencilAttachmentWriteBit
         );
 
+        // Collect materials
+
+        World.Query<Transform, MeshInstance>(renderEntityDesc, CollectEntityMaterial);
+        materials.Upload(commandBuffer);
+
         // Render entities
 
+        var frameUniforms = UploadFrameUniforms(out var clearColor);
+
         commandBuffer.BeginRenderPass(
-            new Attachment(output, AttachmentLoadOp.Clear, AttachmentStoreOp.Store, new Vector4(0.8f, 0.8f, 0.8f, 1)),
+            new Attachment(output, AttachmentLoadOp.Clear, AttachmentStoreOp.Store, new Vector4(clearColor, 1)),
             new Attachment(depth, AttachmentLoadOp.Clear, AttachmentStoreOp.Store, new Vector4(1))
         );
 
         commandBuffer.BindPipeline(pipeline);
 
-        var frameUniforms = UploadFrameUniforms();
-
-        commandBuffer.BindDescriptorSet(0, frameUniforms);
+        commandBuffer.BindDescriptorSet(0, frameUniforms, materials.Buffer);
         commandBuffer.BindDescriptorSet(1, textures.Set, ReadOnlySpan<uint>.Empty);
 
         World.Query<Transform, MeshInstance>(renderEntityDesc, RenderEntity);
@@ -117,7 +133,7 @@ public class Renderer : BaseSystem<World, float> {
         );
     }
 
-    private GpuSubBuffer UploadFrameUniforms() {
+    private GpuSubBuffer UploadFrameUniforms(out Vector3 clearColor) {
         var uniforms = new FrameUniforms();
 
         var entity = World.GetFirstEntity(cameraEntityDesc);
@@ -129,6 +145,19 @@ public class Renderer : BaseSystem<World, float> {
             uniforms.Projection = CreatePerspective(camera);
             uniforms.View = CreateLookAt(transform);
             uniforms.ProjectionView = uniforms.View * uniforms.Projection;
+
+            uniforms.CameraPos = transform.Position;
+
+            uniforms.Environment = new GpuWorldEnvironment {
+                AmbientStrength = camera.Environment.AmbientStrength,
+                SunColor = camera.Environment.SunColor,
+                SunDirection = camera.Environment.SunDirection
+            };
+
+            clearColor = camera.Environment.ClearColor;
+        }
+        else {
+            clearColor = Vector3.One;
         }
 
         return ctx.FrameAllocator.Allocate(BufferUsageFlags.UniformBufferBit, uniforms);
@@ -154,13 +183,28 @@ public class Renderer : BaseSystem<World, float> {
         return m;
     }
 
+    private void CollectEntityMaterial(ref Transform transform, ref MeshInstance instance) {
+        GetMaterialIndex(instance.Material);
+    }
+
     private void RenderEntity(ref Transform transform, ref MeshInstance instance) {
         var mesh = GetMesh(instance.Mesh);
 
+        var positionMatrix = transform.Matrix;
+
+        Matrix4x4.Invert(positionMatrix, out var invMatrix);
+        var normalMatrix = Matrix4x4.Transpose(invMatrix);
+
         var data = new DrawData {
-            Transform = transform.Matrix,
-            Albedo = instance.Material.Albedo,
-            AlbedoTextureI = GetTextureIndex(instance.Material.AlbedoMap)
+            PositionMatrix = positionMatrix,
+
+            NormalMatrix = new Matrix3X4<float>(
+                normalMatrix.M11, normalMatrix.M12, normalMatrix.M13, 0,
+                normalMatrix.M21, normalMatrix.M22, normalMatrix.M23, 0,
+                normalMatrix.M31, normalMatrix.M32, normalMatrix.M33, 0
+            ),
+
+            MaterialI = GetMaterialIndex(instance.Material)
         };
 
         commandBuffer.PushConstants(data);
@@ -177,18 +221,25 @@ public class Renderer : BaseSystem<World, float> {
 
     private Mesh GetMesh(IMesh asset) {
         if (!meshes.TryGetValue(asset, out var mesh)) {
-            mesh = new Mesh();
-
-            if (asset.IndexCount != 0) {
-                mesh.IndexBuffer = CreateBuffer<uint>(asset.IndexCount!.Value, asset.WriteIndices);
-            }
-
-            mesh.VertexBuffer = CreateBuffer<Vertex>(asset.VertexCount, asset.WriteVertices);
-
+            mesh = MeshBuilder.Create(ctx, asset);
             meshes[asset] = mesh;
         }
 
         return mesh;
+    }
+
+    private uint GetMaterialIndex(Material asset) {
+        if (!materialIndices.TryGetValue(asset, out var index)) {
+            var material = new GpuMaterial {
+                Albedo = asset.Albedo,
+                AlbedoTextureI = GetTextureIndex(asset.AlbedoMap)
+            };
+
+            index = materials.Add(material);
+            materialIndices[asset] = index;
+        }
+
+        return index;
     }
 
     private uint GetTextureIndex(ITexture? asset) {
@@ -240,50 +291,39 @@ public class Renderer : BaseSystem<World, float> {
         return index;
     }
 
-    private GpuBuffer CreateBuffer<T>(uint count, Action<Span<T>> writer) where T : unmanaged {
-        var usage = BufferUsageFlags.VertexBufferBit;
-        if (typeof(T) == typeof(uint)) usage = BufferUsageFlags.IndexBufferBit;
-
-        var uploadBuffer = ctx.CreateBuffer(
-            count * Utils.SizeOf<T>(),
-            BufferUsageFlags.TransferSrcBit,
-            MemoryUsage.CPU_Only
-        );
-
-        var data = uploadBuffer.Map<T>();
-        writer(data);
-        uploadBuffer.Unmap();
-
-        var buffer = ctx.CreateBuffer(
-            uploadBuffer.Size,
-            usage | BufferUsageFlags.TransferDstBit,
-            MemoryUsage.GPU_Only
-        );
-
-        // ReSharper disable once AccessToDisposedClosure
-        ctx.Run(commandBuffer => commandBuffer.CopyBuffer(uploadBuffer, buffer));
-
-        uploadBuffer.Dispose();
-
-        return buffer;
-    }
-
     [StructLayout(LayoutKind.Sequential)]
     private struct FrameUniforms {
         public Matrix4x4 Projection;
         public Matrix4x4 View;
         public Matrix4x4 ProjectionView;
+
+        public AlignedVector3 CameraPos;
+
+        public GpuWorldEnvironment Environment;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct GpuWorldEnvironment {
+        public AlignedVector3 SunColor;
+        public Vector3 SunDirection;
+
+        public float AmbientStrength;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct GpuMaterial {
+        public Vector4 Albedo;
+        public uint AlbedoTextureI;
+
+        [DebuggerBrowsable(DebuggerBrowsableState.Never)]
+        private uint _0, _1, _2;
     }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct DrawData {
-        public Matrix4x4 Transform;
-        public Vector4 Albedo;
-        public uint AlbedoTextureI;
-    }
+        public Matrix4x4 PositionMatrix;
+        public Matrix3X4<float> NormalMatrix;
 
-    private class Mesh {
-        public GpuBuffer? IndexBuffer;
-        public GpuBuffer VertexBuffer = null!;
+        public uint MaterialI;
     }
 }

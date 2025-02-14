@@ -14,9 +14,12 @@ public class Program : Application {
     private float yaw, pitch;
 
     protected override void Init() {
-        var model = Model.Load("models/fantasy_game_inn.glb");
-        model.Spawn(World, new Transform());
-        
+        var model = Model.Load("models/cityscene.glb");
+
+        model.Spawn(World, new Transform {
+            Scale = new Vector3(1)
+        });
+
         Console.WriteLine("Entities: " + model.Entities.Count);
         Console.WriteLine("Meshes: " + model.Entities.Select(tuple => tuple.Item2.Mesh).Distinct().Count());
         Console.WriteLine("Materials: " + model.Entities.Select(tuple => tuple.Item2.Material).Distinct().Count());
@@ -25,7 +28,10 @@ public class Program : Application {
             new Transform {
                 Position = new Vector3(0, 0, 0)
             },
-            new Camera(75, 0.1f, 2048)
+            new Camera(75, 0.1f, 2048, new WorldEnvironment {
+                ClearColor = new Vector3(0.75f),
+                SunDirection = Vector3.Normalize(new Vector3(-0.25f, 1.0f, 0.5f))
+            })
         );
     }
 

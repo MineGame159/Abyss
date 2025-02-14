@@ -1,4 +1,6 @@
 bin/
+!/Abyss.Engine/shaders/bin/
+
 obj/
 /packages/
 riderModule.iml

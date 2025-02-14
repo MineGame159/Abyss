@@ -1,9 +1,12 @@
+using System.Collections;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Abyss.Core;
 using Abyss.Engine.Scene;
 using glTFLoader;
 using glTFLoader.Schema;
+using Newtonsoft.Json.Linq;
 using Silk.NET.Maths;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats;
@@ -22,7 +25,7 @@ internal class GltfLoader {
 
     private readonly Model model = new();
 
-    private readonly Dictionary<(int?, int, int), IMesh> meshes = [];
+    private readonly Dictionary<(int?, int, int, int?), IMesh> meshes = [];
 
     private Material? defaultMaterial;
     private readonly Dictionary<GltfMaterial, Material> materials = [];
@@ -48,7 +51,9 @@ internal class GltfLoader {
                 var texCoordI = primitive.Attributes.GetValueOrDefault("TEXCOORD_0", -1);
                 if (texCoordI == -1) continue;
 
-                var mesh = GetMesh(primitive.Indices, posI, texCoordI);
+                var normalI = primitive.Attributes.GetValueOrDefault("NORMAL", -1);
+
+                var mesh = GetMesh(primitive.Indices, posI, texCoordI, normalI);
                 var material = GetMaterial(primitive.Material);
 
                 model.Entities.Add((transform, new MeshInstance(mesh, material)));
@@ -84,8 +89,8 @@ internal class GltfLoader {
         return transform;
     }
 
-    private IMesh GetMesh(int? indexI, int posI, int texCoordI) {
-        var key = (indexI, posI, texCoordI);
+    private IMesh GetMesh(int? indexI, int posI, int texCoordI, int normalI) {
+        var key = (indexI, posI, texCoordI, normalI);
 
         if (!meshes.TryGetValue(key, out var mesh)) {
             mesh = new GltfIMesh(
@@ -93,7 +98,8 @@ internal class GltfLoader {
                 gltfPath,
                 indexI != null ? gltf.Accessors[indexI.Value] : null,
                 gltf.Accessors[posI],
-                gltf.Accessors[texCoordI]
+                gltf.Accessors[texCoordI],
+                normalI != -1 ? gltf.Accessors[normalI] : null
             );
 
             meshes[key] = mesh;
@@ -120,10 +126,23 @@ internal class GltfLoader {
         if (!materials.TryGetValue(gltfMaterial, out var material)) {
             material = new Material();
 
-            if (gltfMaterial.PbrMetallicRoughness.BaseColorTexture != null)
-                material.AlbedoMap = GetTexture(gltf.Textures[gltfMaterial.PbrMetallicRoughness.BaseColorTexture.Index]);
+            if (gltfMaterial.PbrMetallicRoughness != null) {
+                if (gltfMaterial.PbrMetallicRoughness.BaseColorTexture != null)
+                    material.AlbedoMap = GetTexture(gltf.Textures[gltfMaterial.PbrMetallicRoughness.BaseColorTexture.Index]);
 
-            material.Albedo = Rgba.From(gltfMaterial.PbrMetallicRoughness.BaseColorFactor);
+                material.Albedo = Rgba.From(gltfMaterial.PbrMetallicRoughness.BaseColorFactor);
+            }
+            else if (gltfMaterial.Extensions.TryGetValue("KHR_materials_pbrSpecularGlossiness", out var extension)) {
+                var ext = (JObject) extension;
+
+                var diffuseTexture = ext["diffuseTexture"];
+                if (diffuseTexture != null) {
+                    material.AlbedoMap = GetTexture(gltf.Textures[diffuseTexture["index"].Value<uint>()]);
+                }
+
+                var diffuse = ext["diffuseFactor"].Values<float>().ToArray();
+                material.Albedo = Rgba.From(diffuse);
+            }
 
             materials[gltfMaterial] = material;
         }
@@ -263,15 +282,18 @@ internal class GltfIMesh : IMesh {
 
     private readonly Accessor? indexAccessor;
     private readonly Accessor posAccessor;
-    private readonly Accessor texCoordAccessor;
+    private readonly Accessor uvAccessor;
+    private readonly Accessor? normalAccessor;
 
-    public GltfIMesh(Gltf gltf, string gltfPath, Accessor? indexAccessor, Accessor posAccessor, Accessor texCoordAccessor) {
+    public GltfIMesh(Gltf gltf, string gltfPath, Accessor? indexAccessor, Accessor posAccessor, Accessor uvAccessor,
+        Accessor? normalAccessor) {
         this.gltf = gltf;
         this.gltfPath = gltfPath;
 
         this.indexAccessor = indexAccessor;
         this.posAccessor = posAccessor;
-        this.texCoordAccessor = texCoordAccessor;
+        this.uvAccessor = uvAccessor;
+        this.normalAccessor = normalAccessor;
     }
 
     public uint? IndexCount => (uint?) indexAccessor?.Count;
@@ -316,28 +338,78 @@ internal class GltfIMesh : IMesh {
         }
     }
 
-    public unsafe void WriteVertices(Span<Vertex> vertices) {
-        using var posStream = new BufferedStream(GltfLoader.GetStream(gltf, gltfPath, posAccessor));
-        using var texCoordStream = new BufferedStream(GltfLoader.GetStream(gltf, gltfPath, texCoordAccessor));
+    public IEnumerable<Vector3> VertexPositions() {
+        return new AccessorEnumerable<Vector3>(gltf, gltfPath, posAccessor);
+    }
 
-        var pos = Vector3.Zero;
-        var posSpan = new Span<byte>((byte*) &pos, (int) Utils.SizeOf<Vector3>());
+    public IEnumerable<Vector2> VertexUvs() {
+        return new AccessorEnumerable<Vector2>(gltf, gltfPath, uvAccessor);
+    }
 
-        var texCoord = Vector2.Zero;
-        var texCoordSpan = new Span<byte>((byte*) &texCoord, (int) Utils.SizeOf<Vector2>());
+    public IEnumerable<Vector3>? VertexNormals() {
+        return normalAccessor != null ? new AccessorEnumerable<Vector3>(gltf, gltfPath, normalAccessor) : null;
+    }
+}
 
-        if (posSpan.Length != (gltf.BufferViews[posAccessor.BufferView!.Value].ByteStride ?? posSpan.Length))
-            throw new Exception("Position doesn't match stride");
+internal class AccessorEnumerable<T> : IEnumerable<T> where T : unmanaged {
+    private readonly Gltf gltf;
+    private readonly string gltfPath;
+    private readonly Accessor accessor;
 
-        if (texCoordSpan.Length != (gltf.BufferViews[texCoordAccessor.BufferView!.Value].ByteStride ?? texCoordSpan.Length))
-            throw new Exception("Tex coord doesn't match stride");
+    public AccessorEnumerable(Gltf gltf, string gltfPath, Accessor accessor) {
+        this.gltf = gltf;
+        this.gltfPath = gltfPath;
+        this.accessor = accessor;
 
-        for (var i = 0; i < posAccessor.Count; i++) {
-            posStream.ReadExactly(posSpan);
-            texCoordStream.ReadExactly(texCoordSpan);
+        if ((int) Utils.SizeOf<T>() != (gltf.BufferViews[accessor.BufferView!.Value].ByteStride ?? (int) Utils.SizeOf<T>()))
+            throw new Exception("Invalid GLTF buffer view stride");
+    }
 
-            vertices[i] = new Vertex(pos, texCoord);
-        }
+    public IEnumerator<T> GetEnumerator() {
+        return new StreamEnumerator<T>(GltfLoader.GetStream(gltf, gltfPath, accessor), (uint) accessor.Count);
+    }
+
+    IEnumerator IEnumerable.GetEnumerator() {
+        return GetEnumerator();
+    }
+}
+
+internal class StreamEnumerator<T> : IEnumerator<T> where T : unmanaged {
+    private readonly BufferedStream stream;
+    private readonly long startPosition;
+
+    private readonly uint count;
+    private uint i;
+
+    public StreamEnumerator(Stream stream, uint count) {
+        this.stream = new BufferedStream(stream);
+        this.startPosition = stream.Position;
+        this.count = count;
+    }
+
+    public T Current { get; private set; }
+    object IEnumerator.Current => Current;
+
+    public unsafe bool MoveNext() {
+        if (i >= count)
+            return false;
+
+        Unsafe.SkipInit(out T value);
+        stream.ReadExactly(new Span<byte>((byte*) &value, (int) Utils.SizeOf<T>()));
+
+        Current = value;
+        i++;
+
+        return true;
+    }
+
+    public void Reset() {
+        stream.Seek(startPosition, SeekOrigin.Begin);
+        i = 0;
+    }
+
+    public void Dispose() {
+        stream.Dispose();
     }
 }
 

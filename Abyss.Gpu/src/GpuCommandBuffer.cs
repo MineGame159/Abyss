@@ -163,6 +163,28 @@ public class GpuCommandBuffer {
         image.Layout = layout;
     }
 
+    public unsafe void BufferBarrier(
+        GpuSubBuffer buffer,
+        PipelineStageFlags srcStage, AccessFlags srcMask,
+        PipelineStageFlags dstStage, AccessFlags dstMask
+    ) {
+        Ctx.Vk.CmdPipelineBarrier(
+            Handle,
+            srcStage,
+            dstStage,
+            DependencyFlags.None,
+            0, null,
+            1, new BufferMemoryBarrier(
+                srcAccessMask: srcMask,
+                dstAccessMask: dstMask,
+                buffer: buffer.Buffer,
+                offset: buffer.Offset,
+                size: buffer.Size
+            ),
+            0, null
+        );
+    }
+
     public unsafe void BeginRenderPass(params ReadOnlySpan<Attachment> attachments) {
         // Depth attachment
 

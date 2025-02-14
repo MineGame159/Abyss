@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Silk.NET.Vulkan;
 using VMASharp;
 using Buffer = Silk.NET.Vulkan.Buffer;
@@ -18,6 +19,7 @@ public class GpuBuffer : GpuResource, IDescriptor {
         Allocation = allocation;
     }
 
+    [DebuggerBrowsable(DebuggerBrowsableState.Never)]
     public unsafe ulong DeviceAddress => Ctx.Vk.GetBufferDeviceAddress(Ctx.Device, new BufferDeviceAddressInfo(buffer: Handle));
 
     // IDescriptor

@@ -29,6 +29,6 @@ public struct Transform {
     }
 }
 
-public record struct Camera(float Fov, float Near, float Far);
+public record struct Camera(float Fov, float Near, float Far, WorldEnvironment Environment);
 
 public record struct MeshInstance(IMesh Mesh, Material Material);

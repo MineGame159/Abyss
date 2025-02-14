@@ -132,7 +132,7 @@ public class GpuSwapchain {
 
     private SurfaceFormatKHR ChooseSwapSurfaceFormat() {
         foreach (var availableFormat in ctx.Surface.Formats)
-            if (availableFormat is { Format: Format.B8G8R8A8Unorm, ColorSpace: ColorSpaceKHR.SpaceSrgbNonlinearKhr })
+            if (availableFormat is { Format: Format.B8G8R8A8Srgb, ColorSpace: ColorSpaceKHR.SpaceSrgbNonlinearKhr })
                 return availableFormat;
 
         return ctx.Surface.Formats[0];
