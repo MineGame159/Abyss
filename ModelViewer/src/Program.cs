@@ -21,10 +21,11 @@ public class Program : Application {
         });
 
         Console.WriteLine("Entities: " + model.Entities.Count);
-        Console.WriteLine("Meshes: " + model.Entities.Select(tuple => tuple.Item2.Mesh).Distinct().Count());
-        Console.WriteLine("Materials: " + model.Entities.Select(tuple => tuple.Item2.Material).Distinct().Count());
+        Console.WriteLine("Meshes: " + model.Entities.Select(tuple => tuple.Item3.Mesh).Distinct().Count());
+        Console.WriteLine("Materials: " + model.Entities.Select(tuple => tuple.Item3.Material).Distinct().Count());
 
         camera = World.Create(
+            new Info("Camera"),
             new Transform {
                 Position = new Vector3(0, 0, 0)
             },

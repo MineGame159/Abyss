@@ -4,7 +4,7 @@ using Arch.Core;
 namespace Abyss.Engine.Assets;
 
 public class Model {
-    public readonly List<(Transform, MeshInstance)> Entities = [];
+    public readonly List<(string, Transform, MeshInstance)> Entities = [];
 
     internal Model() { }
 
@@ -18,9 +18,9 @@ public class Model {
     public void Spawn(World world, Transform transform) {
         foreach (var entity in Entities) {
             var entityTransform = transform;
-            entityTransform.Apply(entity.Item1);
+            entityTransform.Apply(entity.Item2);
 
-            world.Create(entityTransform, entity.Item2);
+            world.Create(new Info(entity.Item1), entityTransform, entity.Item3);
         }
     }
 }

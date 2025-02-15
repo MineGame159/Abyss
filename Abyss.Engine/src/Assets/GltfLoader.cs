@@ -56,7 +56,7 @@ internal class GltfLoader {
                 var mesh = GetMesh(primitive.Indices, posI, texCoordI, normalI);
                 var material = GetMaterial(primitive.Material);
 
-                model.Entities.Add((transform, new MeshInstance(mesh, material)));
+                model.Entities.Add((node.Name, transform, new MeshInstance(mesh, material)));
             }
         }
 

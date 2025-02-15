@@ -3,7 +3,11 @@ using Abyss.Engine.Assets;
 
 namespace Abyss.Engine.Scene;
 
-public struct Transform {
+public record struct Info(string Name = "", bool Visible = true) {
+    public Info() : this("") { }
+}
+
+public record struct Transform {
     public Vector3 Position;
     public Quaternion Rotation;
     public Vector3 Scale;

@@ -3,3 +3,4 @@ compile() {
 }
 
 compile mesh
+compile imgui

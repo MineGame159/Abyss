@@ -122,15 +122,6 @@ public class Renderer : BaseSystem<World, float> {
         World.Query<Transform, MeshInstance>(renderEntityDesc, RenderEntity);
 
         commandBuffer.EndRenderPass();
-
-        // Present
-
-        commandBuffer.TransitionImage(
-            output,
-            ImageLayout.PresentSrcKhr,
-            PipelineStageFlags.ColorAttachmentOutputBit, AccessFlags.ColorAttachmentWriteBit,
-            PipelineStageFlags.BottomOfPipeBit, AccessFlags.None
-        );
     }
 
     private GpuSubBuffer UploadFrameUniforms(out Vector3 clearColor) {
@@ -183,11 +174,15 @@ public class Renderer : BaseSystem<World, float> {
         return m;
     }
 
-    private void CollectEntityMaterial(ref Transform transform, ref MeshInstance instance) {
-        GetMaterialIndex(instance.Material);
+    private void CollectEntityMaterial(Entity entity, ref Transform transform, ref MeshInstance instance) {
+        if (entity.TryGet(out Info info) && info.Visible)
+            GetMaterialIndex(instance.Material);
     }
 
-    private void RenderEntity(ref Transform transform, ref MeshInstance instance) {
+    private void RenderEntity(Entity entity, ref Transform transform, ref MeshInstance instance) {
+        if (entity.TryGet(out Info info) && !info.Visible)
+            return;
+
         var mesh = GetMesh(instance.Mesh);
 
         var positionMatrix = transform.Matrix;

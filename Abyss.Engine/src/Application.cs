@@ -1,3 +1,4 @@
+using Abyss.Engine.Gui;
 using Abyss.Engine.Render;
 using Abyss.Gpu;
 using Arch.Core;
@@ -61,6 +62,9 @@ public abstract class Application {
         Ctx.Vk.CreateSemaphore(Ctx.Device, new SemaphoreCreateInfo(flags: SemaphoreCreateFlags.None), null, out acquireImageSemaphore);
         Ctx.Vk.CreateSemaphore(Ctx.Device, new SemaphoreCreateInfo(flags: SemaphoreCreateFlags.None), null, out submitSemaphore);
 
+        ImGuiImpl.Init(Ctx);
+        AbyssGui.Init(World);
+
         Init();
     }
 
@@ -78,16 +82,28 @@ public abstract class Application {
         var submitSemaphore = this.submitSemaphore;
 
         Ctx.CommandPool.Reset();
-        
+
         Update((float) delta);
 
         var commandBuffer = Ctx.CommandPool.Get();
-
         commandBuffer.Begin();
+
         Renderer.NewFrame(commandBuffer, output);
         systems.BeforeUpdate((float) delta);
         systems.Update((float) delta);
         systems.AfterUpdate((float) delta);
+
+        ImGuiImpl.BeginFrame((float) delta);
+        AbyssGui.Render();
+        ImGuiImpl.EndFrame(commandBuffer, output);
+
+        commandBuffer.TransitionImage(
+            output,
+            ImageLayout.PresentSrcKhr,
+            PipelineStageFlags.ColorAttachmentOutputBit, AccessFlags.ColorAttachmentWriteBit,
+            PipelineStageFlags.BottomOfPipeBit, AccessFlags.None
+        );
+
         Input.Update();
         commandBuffer.End();
 
