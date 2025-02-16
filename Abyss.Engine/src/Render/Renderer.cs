@@ -62,7 +62,7 @@ public class Renderer : BaseSystem<World, float> {
             [
                 new ColorAttachment(ctx.Swapchain.Images[0].Format, true)
             ],
-            new DepthAttachment(Format.D32Sfloat, CompareOp.Less, true),
+            new DepthAttachment(Format.D32Sfloat, CompareOp.LessOrEqual, true),
             ctx.Pipelines.GetLayout(
                 (uint) Utils.SizeOf<DrawData>(),
                 ctx.Descriptors.GetLayout(DescriptorType.UniformBuffer, DescriptorType.StorageBuffer, DescriptorType.StorageBuffer),
@@ -276,7 +276,9 @@ public class Renderer : BaseSystem<World, float> {
                 Metallic = asset.Metallic,
                 MetallicTextureI = GetTextureIndex(asset.MetallicMap),
 
-                Alpha = asset.Albedo.W
+                Alpha = asset.Albedo.W,
+                AlphaCutoff = asset.AlphaCutoff,
+                Opaque = asset.Opaque ? 1u : 0u
             };
 
             index = materials.Add(material);
@@ -378,9 +380,11 @@ public class Renderer : BaseSystem<World, float> {
         public uint MetallicTextureI;
 
         public float Alpha;
+        public float AlphaCutoff;
+        public uint Opaque;
 
         [DebuggerBrowsable(DebuggerBrowsableState.Never)]
-        private uint _0, _1, _2;
+        private uint _0;
     }
 
     [StructLayout(LayoutKind.Sequential)]

@@ -25,4 +25,11 @@ public class Material {
 
     [InspectorFloat(0.005f, 0, 1)]
     public float Metallic;
+    
+    // Alpha
+
+    [InspectorFloat(0.005f, 0, 1)]
+    public float AlphaCutoff;
+
+    public bool Opaque;
 }

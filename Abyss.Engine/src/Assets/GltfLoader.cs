@@ -153,8 +153,10 @@ internal class GltfLoader {
         if (index == null) {
             defaultMaterial ??= new Material {
                 Albedo = Vector4.One,
-                Roughness = 0.5f,
-                Metallic = 0
+                Roughness = 1,
+                Metallic = 1,
+                AlphaCutoff = 0,
+                Opaque = true
             };
 
             return defaultMaterial;
@@ -194,6 +196,19 @@ internal class GltfLoader {
 
                 var diffuse = ext["diffuseFactor"].Values<float>().ToArray();
                 material.Albedo = Rgba.From(diffuse);
+            }
+
+            material.AlphaCutoff = 0;
+            material.Opaque = true;
+
+            switch (gltfMaterial.AlphaMode) {
+                case GltfMaterial.AlphaModeEnum.MASK:
+                    material.AlphaCutoff = gltfMaterial.AlphaCutoff + float.Epsilon;
+                    break;
+
+                case GltfMaterial.AlphaModeEnum.BLEND:
+                    material.Opaque = false;
+                    break;
             }
 
             materials[gltfMaterial] = material;

@@ -24,6 +24,8 @@ struct Material {
     uint metallicTextureI;
 
     float alpha;
+    float alphaCutoff;
+    uint opaque;
 }
 
 struct DrawData {
@@ -124,8 +126,11 @@ PbrMaterial GetPbrMaterial(float2 uv, Material material, out float alpha) {
         alpha *= sample.a;
     }
 
-    if (alpha <= 0)
+    if (alpha <= material.alphaCutoff)
         discard;
+
+    if (material.opaque == 1)
+        alpha = 1;
 
     // Roughness
 
