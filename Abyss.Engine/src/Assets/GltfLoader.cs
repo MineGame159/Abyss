@@ -29,7 +29,10 @@ internal class GltfLoader {
 
     private Material? defaultMaterial;
     private readonly Dictionary<GltfMaterial, Material> materials = [];
-    private readonly Dictionary<GltfTexture, ITexture> textures = [];
+
+    private readonly Dictionary<GltfTexture, ITexture> rgbaTextures = [];
+    private readonly Dictionary<GltfTexture, ITexture> roughnessTextures = [];
+    private readonly Dictionary<GltfTexture, ITexture> metallicTextures = [];
 
     public GltfLoader(Gltf gltf, string gltfPath) {
         this.gltf = gltf;
@@ -56,7 +59,43 @@ internal class GltfLoader {
                 var mesh = GetMesh(primitive.Indices, posI, texCoordI, normalI);
                 var material = GetMaterial(primitive.Material);
 
-                model.Entities.Add((node.Name, transform, new MeshInstance(mesh, material)));
+                model.Entities.Add((node.Name, transform, new MeshInstance(mesh, material), null, null));
+            }
+        }
+        else if (node.Extensions != null && node.Extensions.TryGetValue("KHR_lights_punctual", out var extension)) {
+            var lightI = ((JObject) extension)["light"].Value<int>();
+            var light = (JObject) ((JArray) ((JObject) gltf.Extensions["KHR_lights_punctual"])["lights"])[lightI];
+            var type = light["type"].Value<string>();
+
+            switch (type) {
+                case "point": {
+                    var color = new Vector3(1);
+                    var intensity = 1.0f;
+
+                    if (light.TryGetValue("color", out var colorJ))
+                        color = new Vector3(colorJ.Values<float>().ToArray());
+
+                    if (light.TryGetValue("intensity", out var intensityJ))
+                        intensity = intensityJ.Value<float>() / 1000;
+
+                    model.Entities.Add((node.Name, transform, null, new PointLight(color, intensity), null));
+                    break;
+                }
+                case "directional": {
+                    var color = new Vector3(1);
+                    var intensity = 1.0f;
+
+                    if (light.TryGetValue("color", out var colorJ))
+                        color = new Vector3(colorJ.Values<float>().ToArray());
+
+                    if (light.TryGetValue("intensity", out var intensityJ))
+                        intensity = intensityJ.Value<float>() / 1000;
+
+                    var direction = Vector3.Transform(new Vector3(0, 0, -1), transform.Matrix);
+
+                    model.Entities.Add((node.Name, transform, null, null, new DirectionalLight(direction, color, intensity)));
+                    break;
+                }
             }
         }
 
@@ -113,7 +152,9 @@ internal class GltfLoader {
 
         if (index == null) {
             defaultMaterial ??= new Material {
-                Albedo = new Rgba(255, 255, 255, 255)
+                Albedo = Vector4.One,
+                Roughness = 0.5f,
+                Metallic = 0
             };
 
             return defaultMaterial;
@@ -127,17 +168,28 @@ internal class GltfLoader {
             material = new Material();
 
             if (gltfMaterial.PbrMetallicRoughness != null) {
-                if (gltfMaterial.PbrMetallicRoughness.BaseColorTexture != null)
-                    material.AlbedoMap = GetTexture(gltf.Textures[gltfMaterial.PbrMetallicRoughness.BaseColorTexture.Index]);
+                var pbr = gltfMaterial.PbrMetallicRoughness;
 
-                material.Albedo = Rgba.From(gltfMaterial.PbrMetallicRoughness.BaseColorFactor);
+                if (pbr.BaseColorTexture != null) {
+                    material.AlbedoMap = GetRgbaTexture(gltf.Textures[pbr.BaseColorTexture.Index]);
+                }
+
+                material.Albedo = new Vector4(pbr.BaseColorFactor);
+
+                if (pbr.MetallicRoughnessTexture != null) {
+                    material.RoughnessMap = GetRoughnessTexture(gltf.Textures[pbr.MetallicRoughnessTexture.Index]);
+                    material.MetallicMap = GetMetallicTexture(gltf.Textures[pbr.MetallicRoughnessTexture.Index]);
+                }
+
+                material.Roughness = pbr.RoughnessFactor;
+                material.Metallic = pbr.MetallicFactor;
             }
             else if (gltfMaterial.Extensions.TryGetValue("KHR_materials_pbrSpecularGlossiness", out var extension)) {
                 var ext = (JObject) extension;
 
                 var diffuseTexture = ext["diffuseTexture"];
                 if (diffuseTexture != null) {
-                    material.AlbedoMap = GetTexture(gltf.Textures[diffuseTexture["index"].Value<uint>()]);
+                    material.AlbedoMap = GetRgbaTexture(gltf.Textures[diffuseTexture["index"].Value<uint>()]);
                 }
 
                 var diffuse = ext["diffuseFactor"].Values<float>().ToArray();
@@ -150,12 +202,34 @@ internal class GltfLoader {
         return material;
     }
 
-    private ITexture GetTexture(GltfTexture gltfTexture) {
-        if (!textures.TryGetValue(gltfTexture, out var texture)) {
+    private ITexture GetRgbaTexture(GltfTexture gltfTexture) {
+        if (!rgbaTextures.TryGetValue(gltfTexture, out var texture)) {
             var image = gltf.Images[gltfTexture.Source!.Value];
-            texture = new GltfITexture(gltf, gltfPath, image);
+            texture = new GltfRgbaTexture(gltf, gltfPath, image);
 
-            textures[gltfTexture] = texture;
+            rgbaTextures[gltfTexture] = texture;
+        }
+
+        return texture;
+    }
+
+    private ITexture GetRoughnessTexture(GltfTexture gltfTexture) {
+        if (!roughnessTextures.TryGetValue(gltfTexture, out var texture)) {
+            var image = gltf.Images[gltfTexture.Source!.Value];
+            texture = new GltfRoughnessMetallicTexture(gltf, gltfPath, image, 1);
+
+            roughnessTextures[gltfTexture] = texture;
+        }
+
+        return texture;
+    }
+
+    private ITexture GetMetallicTexture(GltfTexture gltfTexture) {
+        if (!metallicTextures.TryGetValue(gltfTexture, out var texture)) {
+            var image = gltf.Images[gltfTexture.Source!.Value];
+            texture = new GltfRoughnessMetallicTexture(gltf, gltfPath, image, 2);
+
+            metallicTextures[gltfTexture] = texture;
         }
 
         return texture;
@@ -413,15 +487,16 @@ internal class StreamEnumerator<T> : IEnumerator<T> where T : unmanaged {
     }
 }
 
-internal class GltfITexture : ITexture {
+internal class GltfRgbaTexture : ITexture {
     private readonly Gltf gltf;
     private readonly string gltfPath;
 
     private readonly GltfImage gltfImage;
 
+    public TextureFormat Format => TextureFormat.Rgba;
     public Vector2D<uint> Size { get; }
 
-    public GltfITexture(Gltf gltf, string gltfPath, GltfImage gltfImage) {
+    public GltfRgbaTexture(Gltf gltf, string gltfPath, GltfImage gltfImage) {
         this.gltf = gltf;
         this.gltfPath = gltfPath;
 
@@ -435,7 +510,7 @@ internal class GltfITexture : ITexture {
         Size = new Vector2D<uint>((uint) size.Width, (uint) size.Height);
     }
 
-    public void Write(Span<Rgba> pixels) {
+    public void Write(Span<byte> pixels) {
         using var stream = GltfLoader.GetStream(gltf, gltfPath, gltfImage);
 
         var conf = Configuration.Default.Clone();
@@ -445,11 +520,77 @@ internal class GltfITexture : ITexture {
             Configuration = conf
         }, stream);
 
-        //image.Mutate(ctx => ctx.Flip(FlipMode.Vertical));
+        if (!image.DangerousTryGetSinglePixelMemory(out var memory))
+            throw new Exception("Image is not contiguous");
+
+        MemoryMarshal.Cast<Rgba32, byte>(memory.Span).CopyTo(pixels);
+    }
+}
+
+internal class GltfRoughnessMetallicTexture : ITexture {
+    private readonly Gltf gltf;
+    private readonly string gltfPath;
+
+    private readonly GltfImage gltfImage;
+    private readonly int component;
+
+    public TextureFormat Format => TextureFormat.R;
+    public Vector2D<uint> Size { get; }
+
+    public GltfRoughnessMetallicTexture(Gltf gltf, string gltfPath, GltfImage gltfImage, int component) {
+        this.gltf = gltf;
+        this.gltfPath = gltfPath;
+
+        this.gltfImage = gltfImage;
+        this.component = component;
+
+        // Get size
+
+        using var stream = GltfLoader.GetStream(gltf, gltfPath, gltfImage);
+        var size = Image.Identify(stream).Size;
+
+        Size = new Vector2D<uint>((uint) size.Width, (uint) size.Height);
+    }
+
+    public void Write(Span<byte> pixels) {
+        using var stream = GltfLoader.GetStream(gltf, gltfPath, gltfImage);
+
+        var conf = Configuration.Default.Clone();
+        conf.PreferContiguousImageBuffers = true;
+
+        using var image = Image.Load<Rgb24>(new DecoderOptions {
+            Configuration = conf
+        }, stream);
 
         if (!image.DangerousTryGetSinglePixelMemory(out var memory))
             throw new Exception("Image is not contiguous");
 
-        MemoryMarshal.Cast<Rgba32, Rgba>(memory.Span).CopyTo(pixels);
+        var i = 0;
+
+        switch (component) {
+            case 0:
+                foreach (var pixel in memory.Span) {
+                    pixels[i++] = pixel.R;
+                }
+
+                break;
+
+            case 1:
+                foreach (var pixel in memory.Span) {
+                    pixels[i++] = pixel.G;
+                }
+
+                break;
+
+            case 2:
+                foreach (var pixel in memory.Span) {
+                    pixels[i++] = pixel.B;
+                }
+
+                break;
+
+            default:
+                throw new ArgumentOutOfRangeException();
+        }
     }
 }

@@ -22,23 +22,28 @@ internal static class EntityList {
             var name = GetEntityName(entity, out var visible);
 
             if (!visible) {
-                ImGui.BeginDisabled();
                 ImGui.PushStyleColor(ImGuiCol.Text, ImGui.GetColorU32(ImGuiCol.TextDisabled));
             }
 
             var selected = SelectedEntity == entity;
-            ImGui.Selectable(name, ref selected);
+            var clicked = ImGui.Selectable(name, ref selected, ImGuiSelectableFlags.AllowDoubleClick);
+
             if (selected) SelectedEntity = entity.Reference();
+            if (clicked && ImGuiP.IsMouseDoubleClicked(ImGuiMouseButton.Left)) ToggleVisibility();
 
             if (!visible) {
                 ImGui.PopStyleColor();
-                ImGui.EndDisabled();
             }
 
             ImGui.PopID();
         });
 
         ImGui.End();
+    }
+
+    private static void ToggleVisibility() {
+        ref var info = ref SelectedEntity.Entity.TryGetRef<Info>(out var exists);
+        if (exists) info.Visible = !info.Visible;
     }
 
     private static string GetEntityName(Entity entity, out bool visible) {

@@ -17,14 +17,23 @@ using DescriptorType = Abyss.Gpu.DescriptorType;
 namespace Abyss.Engine.Render;
 
 public class Renderer : BaseSystem<World, float> {
-    private static readonly QueryDescription cameraEntityDesc = new QueryDescription().WithAll<Transform, Camera>();
-    private static readonly QueryDescription renderEntityDesc = new QueryDescription().WithAll<Transform, MeshInstance>();
+    private static readonly QueryDescription cameraEntityDesc = new QueryDescription()
+        .WithAll<Transform, Camera>();
+
+    private static readonly QueryDescription renderEntityDesc = new QueryDescription()
+        .WithAll<Transform, MeshInstance>();
+
+    private static readonly QueryDescription lightEntityDesc = new QueryDescription()
+        .WithAll<Transform>()
+        .WithAny<PointLight, DirectionalLight>();
 
     private readonly GpuContext ctx;
 
     private readonly GpuGraphicsPipeline pipeline;
 
     private readonly Dictionary<IMesh, Mesh> meshes = [];
+
+    private readonly GrowableStorageBuffer<GpuLight> lights;
 
     private readonly GrowableStorageBuffer<GpuMaterial> materials;
     private readonly Dictionary<Material, uint> materialIndices = [];
@@ -56,12 +65,14 @@ public class Renderer : BaseSystem<World, float> {
             new DepthAttachment(Format.D32Sfloat, CompareOp.Less, true),
             ctx.Pipelines.GetLayout(
                 (uint) Utils.SizeOf<DrawData>(),
-                ctx.Descriptors.GetLayout(DescriptorType.UniformBuffer, DescriptorType.StorageBuffer),
+                ctx.Descriptors.GetLayout(DescriptorType.UniformBuffer, DescriptorType.StorageBuffer, DescriptorType.StorageBuffer),
                 ctx.Descriptors.GetLayout(new DescriptorInfo(DescriptorType.ImageSampler, 128))
             )
         ));
 
-        materials = new GrowableStorageBuffer<GpuMaterial>(ctx, 128);
+        lights = new GrowableStorageBuffer<GpuLight>(ctx, 64);
+
+        materials = new GrowableStorageBuffer<GpuMaterial>(ctx, 256);
 
         textures = new GpuTextureArray(ctx, 128);
 
@@ -100,9 +111,21 @@ public class Renderer : BaseSystem<World, float> {
             AccessFlags.DepthStencilAttachmentReadBit | AccessFlags.DepthStencilAttachmentWriteBit
         );
 
+        // Collect lights
+
+        lights.Clear();
+
+        World.Query<Transform>(lightEntityDesc, CollectEntityLight);
+
+        lights.Upload(commandBuffer);
+
         // Collect materials
 
+        materials.Clear();
+        materialIndices.Clear();
+
         World.Query<Transform, MeshInstance>(renderEntityDesc, CollectEntityMaterial);
+
         materials.Upload(commandBuffer);
 
         // Render entities
@@ -116,7 +139,7 @@ public class Renderer : BaseSystem<World, float> {
 
         commandBuffer.BindPipeline(pipeline);
 
-        commandBuffer.BindDescriptorSet(0, frameUniforms, materials.Buffer);
+        commandBuffer.BindDescriptorSet(0, frameUniforms, lights.Buffer, materials.Buffer);
         commandBuffer.BindDescriptorSet(1, textures.Set, ReadOnlySpan<uint>.Empty);
 
         World.Query<Transform, MeshInstance>(renderEntityDesc, RenderEntity);
@@ -125,7 +148,9 @@ public class Renderer : BaseSystem<World, float> {
     }
 
     private GpuSubBuffer UploadFrameUniforms(out Vector3 clearColor) {
-        var uniforms = new FrameUniforms();
+        var uniforms = new FrameUniforms {
+            LightCount = lights.Count
+        };
 
         var entity = World.GetFirstEntity(cameraEntityDesc);
 
@@ -138,12 +163,6 @@ public class Renderer : BaseSystem<World, float> {
             uniforms.ProjectionView = uniforms.View * uniforms.Projection;
 
             uniforms.CameraPos = transform.Position;
-
-            uniforms.Environment = new GpuWorldEnvironment {
-                AmbientStrength = camera.Environment.AmbientStrength,
-                SunColor = camera.Environment.SunColor,
-                SunDirection = camera.Environment.SunDirection
-            };
 
             clearColor = camera.Environment.ClearColor;
         }
@@ -172,6 +191,28 @@ public class Renderer : BaseSystem<World, float> {
         };
 
         return m;
+    }
+
+    private void CollectEntityLight(Entity entity, ref Transform transform) {
+        if (entity.TryGet(out Info info) && !info.Visible)
+            return;
+
+        if (entity.TryGet(out PointLight point)) {
+            lights.Add(new GpuLight {
+                Type = GpuLightType.Point,
+                Color = point.Color * point.Intensity,
+                Data = transform.Position
+            });
+        }
+        else {
+            ref var directional = ref entity.Get<DirectionalLight>();
+
+            lights.Add(new GpuLight {
+                Type = GpuLightType.Directional,
+                Color = directional.Color * directional.Intensity,
+                Data = -Vector3.Normalize(directional.Direction)
+            });
+        }
     }
 
     private void CollectEntityMaterial(Entity entity, ref Transform transform, ref MeshInstance instance) {
@@ -226,8 +267,16 @@ public class Renderer : BaseSystem<World, float> {
     private uint GetMaterialIndex(Material asset) {
         if (!materialIndices.TryGetValue(asset, out var index)) {
             var material = new GpuMaterial {
-                Albedo = asset.Albedo,
-                AlbedoTextureI = GetTextureIndex(asset.AlbedoMap)
+                Albedo = new Vector3(asset.Albedo.X, asset.Albedo.Y, asset.Albedo.Z),
+                AlbedoTextureI = GetTextureIndex(asset.AlbedoMap),
+
+                Roughness = asset.Roughness,
+                RoughnessTextureI = GetTextureIndex(asset.RoughnessMap),
+
+                Metallic = asset.Metallic,
+                MetallicTextureI = GetTextureIndex(asset.MetallicMap),
+
+                Alpha = asset.Albedo.W
             };
 
             index = materials.Add(material);
@@ -243,19 +292,23 @@ public class Renderer : BaseSystem<World, float> {
 
         if (!textureIndices.TryGetValue(asset, out var index)) {
             var uploadBuffer = ctx.CreateBuffer(
-                asset.Size.X * asset.Size.Y * Utils.SizeOf<Rgba>(),
+                asset.Size.X * asset.Size.Y * asset.Format.Size(),
                 BufferUsageFlags.TransferSrcBit,
                 MemoryUsage.CPU_Only
             );
 
-            var data = uploadBuffer.Map<Rgba>();
-            asset.Write(data);
+            var pixels = uploadBuffer.Map<byte>();
+            asset.Write(pixels);
             uploadBuffer.Unmap();
 
             var image = ctx.CreateImage(
                 asset.Size,
                 ImageUsageFlags.SampledBit | ImageUsageFlags.TransferDstBit,
-                Format.R8G8B8A8Unorm
+                asset.Format switch {
+                    TextureFormat.R => Format.R8Unorm,
+                    TextureFormat.Rgba => Format.R8G8B8A8Unorm,
+                    _ => throw new ArgumentOutOfRangeException()
+                }
             );
 
             ctx.Run(commandBuffer => {
@@ -292,23 +345,39 @@ public class Renderer : BaseSystem<World, float> {
         public Matrix4x4 View;
         public Matrix4x4 ProjectionView;
 
-        public AlignedVector3 CameraPos;
+        public Vector3 CameraPos;
 
-        public GpuWorldEnvironment Environment;
+        public uint LightCount;
+    }
+
+    private enum GpuLightType : uint {
+        Point,
+        Directional
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct GpuWorldEnvironment {
-        public AlignedVector3 SunColor;
-        public Vector3 SunDirection;
+    private struct GpuLight {
+        public Vector3 Color;
+        public GpuLightType Type;
 
-        public float AmbientStrength;
+        public Vector3 Data;
+
+        [DebuggerBrowsable(DebuggerBrowsableState.Never)]
+        private uint _0;
     }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct GpuMaterial {
-        public Vector4 Albedo;
+        public Vector3 Albedo;
         public uint AlbedoTextureI;
+
+        public float Roughness;
+        public uint RoughnessTextureI;
+
+        public float Metallic;
+        public uint MetallicTextureI;
+
+        public float Alpha;
 
         [DebuggerBrowsable(DebuggerBrowsableState.Never)]
         private uint _0, _1, _2;

@@ -4,7 +4,7 @@ using Arch.Core;
 namespace Abyss.Engine.Assets;
 
 public class Model {
-    public readonly List<(string, Transform, MeshInstance)> Entities = [];
+    public readonly List<(string, Transform, MeshInstance?, PointLight?, DirectionalLight?)> Entities = [];
 
     internal Model() { }
 
@@ -20,7 +20,14 @@ public class Model {
             var entityTransform = transform;
             entityTransform.Apply(entity.Item2);
 
-            world.Create(new Info(entity.Item1), entityTransform, entity.Item3);
+            var info = new Info(entity.Item1);
+
+            if (entity.Item3 != null)
+                world.Create(info, entityTransform, entity.Item3!.Value);
+            else if (entity.Item4 != null)
+                world.Create(info, entityTransform, entity.Item4!.Value);
+            else if (entity.Item5 != null)
+                world.Create(info, entityTransform, entity.Item5!.Value);
         }
     }
 }

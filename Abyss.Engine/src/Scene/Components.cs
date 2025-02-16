@@ -1,9 +1,18 @@
 using System.Numerics;
 using Abyss.Engine.Assets;
+using Abyss.Engine.Gui;
 
 namespace Abyss.Engine.Scene;
 
-public record struct Info(string Name = "", bool Visible = true) {
+public record struct Info {
+    public string Name;
+    public bool Visible;
+
+    public Info(string name, bool visible = true) {
+        Name = name;
+        Visible = visible;
+    }
+
     public Info() : this("") { }
 }
 
@@ -33,6 +42,62 @@ public record struct Transform {
     }
 }
 
-public record struct Camera(float Fov, float Near, float Far, WorldEnvironment Environment);
+public record struct Camera {
+    [InspectorFloat(0.1f, 0)]
+    public float Fov;
+    
+    [InspectorFloat(0.1f, 0)]
+    public float Near;
+    
+    [InspectorFloat(0.1f, 0)]
+    public float Far;
 
-public record struct MeshInstance(IMesh Mesh, Material Material);
+    public WorldEnvironment Environment;
+
+    public Camera(float fov, float near, float far, WorldEnvironment environment) {
+        Fov = fov;
+        Near = near;
+        Far = far;
+        Environment = environment;
+    }
+}
+
+public record struct MeshInstance {
+    public IMesh Mesh;
+    public Material Material;
+
+    public MeshInstance(IMesh mesh, Material material) {
+        Mesh = mesh;
+        Material = material;
+    }
+}
+
+public record struct PointLight {
+    [InspectorFloat(0.005f, 0)]
+    public Vector3 Color;
+
+    [InspectorFloat(0.005f, 0)]
+    public float Intensity;
+
+    public PointLight(Vector3 color, float intensity) {
+        Color = color;
+        Intensity = intensity;
+    }
+}
+
+public record struct DirectionalLight {
+    [InspectorFloat(0.05f)]
+    public Vector3 Direction;
+
+    [InspectorFloat(0.005f, 0)]
+    public Vector3 Color;
+
+    [InspectorFloat(0.005f, 0)]
+    public float Intensity;
+
+    public DirectionalLight(Vector3 direction, Vector3 color, float intensity) {
+        Direction = direction;
+        Color = color;
+        Intensity = intensity;
+    }
+}

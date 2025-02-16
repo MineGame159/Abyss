@@ -185,17 +185,15 @@ internal static class Inspector {
 
     private static bool RenderIntN<T>(Span<T> values) where T : IBinaryInteger<T>, IMinMaxValue<T> {
         var spacing = ImGui.GetStyle().ItemInnerSpacing.X;
-        var width = ImGui.GetContentRegionAvail().X - spacing * (values.Length - 1);
-
         var changed = false;
+
+        ImGuiP.PushMultiItemsWidths(values.Length, ImGui.GetContentRegionAvail().X);
 
         for (var i = 0; i < values.Length; i++) {
             ImGui.PushID(i);
 
             if (i > 0)
                 ImGui.SameLine(0, spacing);
-
-            ImGui.SetNextItemWidth(width / values.Length);
 
             var v = int.CreateChecked(values[i]);
 
@@ -205,6 +203,7 @@ internal static class Inspector {
             }
 
             ImGui.PopID();
+            ImGui.PopItemWidth();
         }
 
         return changed;
@@ -212,9 +211,9 @@ internal static class Inspector {
 
     private static bool RenderFloatN(Span<float> values, float speed, float min, float max) {
         var spacing = ImGui.GetStyle().ItemInnerSpacing.X;
-        var width = ImGui.GetContentRegionAvail().X - spacing * (values.Length - 1);
-
         var changed = false;
+
+        ImGuiP.PushMultiItemsWidths(values.Length, ImGui.GetContentRegionAvail().X);
 
         for (var i = 0; i < values.Length; i++) {
             ImGui.PushID(i);
@@ -222,13 +221,12 @@ internal static class Inspector {
             if (i > 0)
                 ImGui.SameLine(0, spacing);
 
-            ImGui.SetNextItemWidth(width / values.Length);
-
             if (ImGui.DragFloat("", ref values[i], speed, min, max)) {
                 changed = true;
             }
 
             ImGui.PopID();
+            ImGui.PopItemWidth();
         }
 
         return changed;

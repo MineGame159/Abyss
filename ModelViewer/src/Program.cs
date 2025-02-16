@@ -21,8 +21,8 @@ public class Program : Application {
         });
 
         Console.WriteLine("Entities: " + model.Entities.Count);
-        Console.WriteLine("Meshes: " + model.Entities.Select(tuple => tuple.Item3.Mesh).Distinct().Count());
-        Console.WriteLine("Materials: " + model.Entities.Select(tuple => tuple.Item3.Material).Distinct().Count());
+        Console.WriteLine("Meshes: " + model.Entities.Select(tuple => tuple.Item3?.Mesh).Where(m => m != null).Distinct().Count());
+        Console.WriteLine("Materials: " + model.Entities.Select(tuple => tuple.Item3?.Material).Where(m => m != null).Distinct().Count());
 
         camera = World.Create(
             new Info("Camera"),
@@ -30,9 +30,20 @@ public class Program : Application {
                 Position = new Vector3(0, 0, 0)
             },
             new Camera(75, 0.1f, 2048, new WorldEnvironment {
-                ClearColor = new Vector3(0.75f),
-                SunDirection = Vector3.Normalize(new Vector3(-0.25f, 1.0f, 0.5f))
+                ClearColor = new Vector3(0.75f)
             })
+        );
+
+        World.Create(
+            new Info("Light"),
+            new Transform {
+                Position = new Vector3(5)
+            },
+            new DirectionalLight {
+                Direction = new Vector3(1.3f, -2.9f, -2.5f),
+                Color = new Vector3(1),
+                Intensity = 6
+            }
         );
     }
 

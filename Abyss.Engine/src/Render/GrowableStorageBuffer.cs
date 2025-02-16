@@ -23,12 +23,21 @@ public class GrowableStorageBuffer<T> : IDisposable where T : unmanaged {
         );
     }
 
+    public uint Count => (uint) items.Count;
+
+    public void Clear() {
+        items.Clear();
+    }
+
     public uint Add(T item) {
         items.Add(item);
         return (uint) items.Count - 1;
     }
 
     public void Upload(GpuCommandBuffer commandBuffer) {
+        if (items.Count == 0)
+            return;
+
         var uploadBuffer = ctx.FrameAllocator.Allocate<T>(BufferUsageFlags.TransferSrcBit, CollectionsMarshal.AsSpan(items));
 
         if (uploadBuffer.Size > Buffer.Size) {

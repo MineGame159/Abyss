@@ -1,4 +1,7 @@
+import "lib/light";
+import "lib/pbr";
 import "lib/tonemap";
+import "lib/utils";
 
 struct FrameUniforms {
     float4x4 projection;
@@ -7,19 +10,20 @@ struct FrameUniforms {
 
     float3 cameraPos;
 
-    WorldEnvironment env;
-}
-
-struct WorldEnvironment {
-    float3 sunColor;
-    float3 sunDirection;
-
-    float ambientStrength;
+    uint lightCount;
 }
 
 struct Material {
-    float4 albedo;
+    float3 albedo;
     uint albedoTextureI;
+
+    float roughness;
+    uint roughnessTextureI;
+
+    float metallic;
+    uint metallicTextureI;
+
+    float alpha;
 }
 
 struct DrawData {
@@ -33,6 +37,9 @@ struct DrawData {
 uniform ConstantBuffer<FrameUniforms> frame;
 
 [vk_binding(1, 0)]
+uniform StructuredBuffer<Light> lights;
+
+[vk_binding(2, 0)]
 uniform StructuredBuffer<Material> materials;
 
 [vk_binding(0, 1)]
@@ -67,42 +74,74 @@ VertexOut vertex(VertexIn in) {
     return out;
 }
 
-static const let gamma = 2.2;
-static const let shininess = 0.5;
-
 [shader("fragment")]
 float4 fragment(float3 pos, float2 uv, float3 normal) {
+    // Material
+
     let material = materials[draw.materialI];
 
-    // Albedo
+    var alpha = 1.0;
+    let pbrMat = GetPbrMaterial(uv, material, alpha);
 
-    var albedo = material.albedo;
+    // Lighting
+
+    let N = normalize(normal);
+    let V = normalize(frame.cameraPos - pos);
+
+    var Lo = float3(0.0);
+
+    for (uint i = 0; i < frame.lightCount; i++) {
+        let light = lights[i];
+
+        var L = float3(0.0);
+        let radiance = light.GetRadiance(pos, L);
+
+        Lo += EvaluateBrdf(N, V, L, radiance, pbrMat);
+    }
+
+    // Result
+
+    let ambient = float3(0.03) * pbrMat.albedo;
+
+    var color = ambient + Lo;
+    color = Uncharted2Filmic(color);
+
+    return float4(color, alpha);
+}
+
+PbrMaterial GetPbrMaterial(float2 uv, Material material, out float alpha) {
+    PbrMaterial pbrMat;
+
+    // Albedo & Alpha
+
+    pbrMat.albedo = material.albedo;
+    alpha = material.alpha;
 
     if (material.albedoTextureI != 0) {
         let sample = textures[material.albedoTextureI - 1].Sample(uv);
 
-        albedo.rgb *= pow(sample.rgb, gamma);
-        albedo.a *= sample.a;
+        pbrMat.albedo *= ToLinear(sample.rgb);
+        alpha *= sample.a;
     }
 
-    if (albedo.a <= 0)
+    if (alpha <= 0)
         discard;
 
-    // Lighting
+    // Roughness
 
-    let env = frame.env;
+    pbrMat.roughness = material.roughness;
 
-    let ambient = env.ambientStrength * env.sunColor;
+    if (material.roughnessTextureI != 0) {
+        pbrMat.roughness *= textures[material.roughnessTextureI - 1].Sample(uv).r;
+    }
 
-    let diff = max(dot(normal, env.sunDirection), 0.0);
-    let diffuse = diff * env.sunColor;
+    // Metallic
 
-    let viewDir = normalize(frame.cameraPos - pos);
-    let halfwayDir = normalize(env.sunDirection + viewDir);
-    let spec = pow(max(dot(normal, halfwayDir), 0.0), shininess);
-    let specular = env.sunColor * spec;
+    pbrMat.metallic = material.metallic;
 
-    let result = (ambient + diffuse + specular) * albedo.rgb;
+    if (material.metallicTextureI != 0) {
+        pbrMat.metallic *= textures[material.metallicTextureI - 1].Sample(uv).r;
+    }
 
-    return float4(Uncharted2Filmic(result), albedo.a);
+    return pbrMat;
 }
