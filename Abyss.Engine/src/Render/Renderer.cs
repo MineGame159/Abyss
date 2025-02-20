@@ -38,6 +38,9 @@ public class Renderer : BaseSystem<World, float> {
     private readonly GrowableStorageBuffer<GpuMaterial> materials;
     private readonly Dictionary<Material, uint> materialIndices = [];
 
+    private readonly List<Entity> opaqueEntities = [];
+    private readonly List<Entity> translucentEntities = [];
+
     private readonly GpuTextureArray textures;
     private readonly Dictionary<ITexture, uint> textureIndices = [];
 
@@ -111,6 +114,11 @@ public class Renderer : BaseSystem<World, float> {
             AccessFlags.DepthStencilAttachmentReadBit | AccessFlags.DepthStencilAttachmentWriteBit
         );
 
+        // Uniforms
+
+        var frameUniforms = GetFrameUniforms(out var clearColor);
+        var frameUniformsBuffer = ctx.FrameAllocator.Allocate(BufferUsageFlags.UniformBufferBit, frameUniforms);
+
         // Collect lights
 
         lights.Clear();
@@ -119,18 +127,22 @@ public class Renderer : BaseSystem<World, float> {
 
         lights.Upload(commandBuffer);
 
-        // Collect materials
+        // Collect render entities
 
         materials.Clear();
         materialIndices.Clear();
 
-        World.Query<Transform, MeshInstance>(renderEntityDesc, CollectEntityMaterial);
+        opaqueEntities.Clear();
+        translucentEntities.Clear();
+
+        World.Query<Transform, MeshInstance>(renderEntityDesc, CollectRenderEntity);
+
+        opaqueEntities.Sort(CloserEntityComparison);
+        translucentEntities.Sort(FurtherEntityComparison);
 
         materials.Upload(commandBuffer);
 
         // Render entities
-
-        var frameUniforms = UploadFrameUniforms(out var clearColor);
 
         commandBuffer.BeginRenderPass(
             new Attachment(output, AttachmentLoadOp.Clear, AttachmentStoreOp.Store, new Vector4(clearColor, 1)),
@@ -139,15 +151,50 @@ public class Renderer : BaseSystem<World, float> {
 
         commandBuffer.BindPipeline(pipeline);
 
-        commandBuffer.BindDescriptorSet(0, frameUniforms, lights.Buffer, materials.Buffer);
+        commandBuffer.BindDescriptorSet(0, frameUniformsBuffer, lights.Buffer, materials.Buffer);
         commandBuffer.BindDescriptorSet(1, textures.Set, ReadOnlySpan<uint>.Empty);
 
-        World.Query<Transform, MeshInstance>(renderEntityDesc, RenderEntity);
+        commandBuffer.BeginGroup("Opaque");
+
+        foreach (var entity in opaqueEntities) {
+            RenderEntity(entity);
+        }
+
+        commandBuffer.EndGroup();
+        commandBuffer.BeginGroup("Translucent");
+
+        foreach (var entity in translucentEntities) {
+            RenderEntity(entity);
+        }
+
+        commandBuffer.EndGroup();
 
         commandBuffer.EndRenderPass();
+
+        return;
+
+        int CloserEntityComparison(Entity e1, Entity e2) {
+            ref var t1 = ref e1.Get<Transform>();
+            ref var t2 = ref e2.Get<Transform>();
+
+            var d1 = Vector3.DistanceSquared(frameUniforms.CameraPos, t1.Position);
+            var d2 = Vector3.DistanceSquared(frameUniforms.CameraPos, t2.Position);
+
+            return d1.CompareTo(d2);
+        }
+
+        int FurtherEntityComparison(Entity e1, Entity e2) {
+            ref var t1 = ref e1.Get<Transform>();
+            ref var t2 = ref e2.Get<Transform>();
+
+            var d1 = Vector3.DistanceSquared(frameUniforms.CameraPos, t1.Position);
+            var d2 = Vector3.DistanceSquared(frameUniforms.CameraPos, t2.Position);
+
+            return d2.CompareTo(d1);
+        }
     }
 
-    private GpuSubBuffer UploadFrameUniforms(out Vector3 clearColor) {
+    private FrameUniforms GetFrameUniforms(out Vector3 clearColor) {
         var uniforms = new FrameUniforms {
             LightCount = lights.Count
         };
@@ -170,7 +217,7 @@ public class Renderer : BaseSystem<World, float> {
             clearColor = Vector3.One;
         }
 
-        return ctx.FrameAllocator.Allocate(BufferUsageFlags.UniformBufferBit, uniforms);
+        return uniforms;
     }
 
     private static Matrix4x4 CreateLookAt(in Transform transform) {
@@ -215,14 +262,18 @@ public class Renderer : BaseSystem<World, float> {
         }
     }
 
-    private void CollectEntityMaterial(Entity entity, ref Transform transform, ref MeshInstance instance) {
-        if (entity.TryGet(out Info info) && info.Visible)
+    private void CollectRenderEntity(Entity entity, ref Transform transform, ref MeshInstance instance) {
+        if (entity.TryGet(out Info info) && info.Visible) {
             GetMaterialIndex(instance.Material);
+
+            if (instance.Material.Opaque) opaqueEntities.Add(entity);
+            else translucentEntities.Add(entity);
+        }
     }
 
-    private void RenderEntity(Entity entity, ref Transform transform, ref MeshInstance instance) {
-        if (entity.TryGet(out Info info) && !info.Visible)
-            return;
+    private void RenderEntity(Entity entity) {
+        ref var transform = ref entity.Get<Transform>();
+        ref var instance = ref entity.Get<MeshInstance>();
 
         var mesh = GetMesh(instance.Mesh);
 
