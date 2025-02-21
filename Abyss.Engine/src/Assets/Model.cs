@@ -1,3 +1,4 @@
+using Abyss.Engine.Assets.Gltf;
 using Abyss.Engine.Scene;
 using Arch.Core;
 

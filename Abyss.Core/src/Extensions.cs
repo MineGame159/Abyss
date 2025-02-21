@@ -39,6 +39,13 @@ public static class ListExt {
 }
 
 public static class StreamExt {
+    public static T Read<T>(this Stream src) where T : unmanaged {
+        var value = default(T);
+        src.ReadExactly(MemoryMarshal.Cast<T, byte>(new Span<T>(ref value)));
+
+        return value;
+    }
+
     public static void CopyToSize(this Stream src, Stream dst, int bytes) {
         var buffer = ArrayPool<byte>.Shared.Rent(8192);
 

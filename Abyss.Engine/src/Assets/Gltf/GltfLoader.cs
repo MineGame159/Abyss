@@ -4,23 +4,16 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Abyss.Core;
 using Abyss.Engine.Scene;
-using glTFLoader;
-using glTFLoader.Schema;
-using Newtonsoft.Json.Linq;
 using Silk.NET.Maths;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats;
 using SixLabors.ImageSharp.PixelFormats;
-using Buffer = glTFLoader.Schema.Buffer;
-using GltfMaterial = glTFLoader.Schema.Material;
-using GltfTexture = glTFLoader.Schema.Texture;
-using GltfImage = glTFLoader.Schema.Image;
 using Image = SixLabors.ImageSharp.Image;
 
-namespace Abyss.Engine.Assets;
+namespace Abyss.Engine.Assets.Gltf;
 
 internal class GltfLoader {
-    private readonly Gltf gltf;
+    private readonly GltfFile gltf;
     private readonly string gltfPath;
 
     private readonly Model model = new();
@@ -34,18 +27,18 @@ internal class GltfLoader {
     private readonly Dictionary<GltfTexture, ITexture> roughnessTextures = [];
     private readonly Dictionary<GltfTexture, ITexture> metallicTextures = [];
 
-    public GltfLoader(Gltf gltf, string gltfPath) {
+    public GltfLoader(GltfFile gltf, string gltfPath) {
         this.gltf = gltf;
         this.gltfPath = gltfPath;
     }
 
-    private void Load(Node node, Transform transform) {
+    private void Load(GltfNode node, Transform transform) {
         var localTransform = GetLocalTransform(node);
         transform.Apply(localTransform);
 
         if (node.Mesh != null) {
-            foreach (var primitive in gltf.Meshes[node.Mesh!.Value].Primitives) {
-                if (primitive.Mode != MeshPrimitive.ModeEnum.TRIANGLES)
+            foreach (var primitive in node.Mesh.Primitives) {
+                if (primitive.Mode != GltfPrimitiveMode.Triangles)
                     continue;
 
                 var posI = primitive.Attributes.GetValueOrDefault("POSITION", -1);
@@ -62,67 +55,45 @@ internal class GltfLoader {
                 model.Entities.Add((node.Name, transform, new MeshInstance(mesh, material), null, null));
             }
         }
-        else if (node.Extensions != null && node.Extensions.TryGetValue("KHR_lights_punctual", out var extension)) {
-            var lightI = ((JObject) extension)["light"].Value<int>();
-            var light = (JObject) ((JArray) ((JObject) gltf.Extensions["KHR_lights_punctual"])["lights"])[lightI];
-            var type = light["type"].Value<string>();
+        else if (node.TryGetExtension(out GltfLightsPunctualExt ext)) {
+            var light = ext.Light!;
 
-            switch (type) {
-                case "point": {
-                    var color = new Vector3(1);
-                    var intensity = 1.0f;
-
-                    if (light.TryGetValue("color", out var colorJ))
-                        color = new Vector3(colorJ.Values<float>().ToArray());
-
-                    if (light.TryGetValue("intensity", out var intensityJ))
-                        intensity = intensityJ.Value<float>() / 1000;
+            switch (light.Type) {
+                case GltfLightType.Point: {
+                    var color = light.Color;
+                    var intensity = light.Intensity / 1000;
 
                     model.Entities.Add((node.Name, transform, null, new PointLight(color, intensity), null));
                     break;
                 }
-                case "directional": {
-                    var color = new Vector3(1);
-                    var intensity = 1.0f;
-
-                    if (light.TryGetValue("color", out var colorJ))
-                        color = new Vector3(colorJ.Values<float>().ToArray());
-
-                    if (light.TryGetValue("intensity", out var intensityJ))
-                        intensity = intensityJ.Value<float>() / 1000;
-
+                case GltfLightType.Directional: {
+                    var color = light.Color;
+                    var intensity = light.Intensity / 1000;
                     var direction = Vector3.Transform(new Vector3(0, 0, -1), transform.Matrix);
 
                     model.Entities.Add((node.Name, transform, null, null, new DirectionalLight(direction, color, intensity)));
                     break;
                 }
+                default:
+                    throw new ArgumentOutOfRangeException();
             }
         }
 
-        if (node.Children != null) {
-            foreach (var childI in node.Children) {
-                Load(gltf.Nodes[childI], transform);
-            }
+        foreach (var child in node) {
+            Load(child, transform);
         }
     }
 
-    private Transform GetLocalTransform(Node node) {
+    private Transform GetLocalTransform(GltfNode node) {
         Transform transform;
 
-        if (node.ShouldSerializeMatrix()) {
-            var matrix = new Matrix4x4(
-                node.Matrix[0], node.Matrix[1], node.Matrix[2], node.Matrix[3],
-                node.Matrix[4], node.Matrix[5], node.Matrix[6], node.Matrix[7],
-                node.Matrix[8], node.Matrix[9], node.Matrix[10], node.Matrix[11],
-                node.Matrix[12], node.Matrix[13], node.Matrix[14], node.Matrix[15]
-            );
-
-            Matrix4x4.Decompose(matrix, out transform.Scale, out transform.Rotation, out transform.Position);
+        if (!node.Matrix.IsIdentity) {
+            Matrix4x4.Decompose(node.Matrix, out transform.Scale, out transform.Rotation, out transform.Position);
         }
         else {
-            transform.Position = new Vector3(node.Translation);
-            transform.Rotation = new Quaternion(node.Rotation[0], node.Rotation[1], node.Rotation[2], node.Rotation[3]);
-            transform.Scale = new Vector3(node.Scale);
+            transform.Position = node.Translation;
+            transform.Rotation = node.Rotation;
+            transform.Scale = node.Scale;
         }
 
         return transform;
@@ -176,7 +147,7 @@ internal class GltfLoader {
                     material.AlbedoMap = GetRgbaTexture(gltf.Textures[pbr.BaseColorTexture.Index]);
                 }
 
-                material.Albedo = new Vector4(pbr.BaseColorFactor);
+                material.Albedo = pbr.BaseColorFactor;
 
                 if (pbr.MetallicRoughnessTexture != null) {
                     material.RoughnessMap = GetRoughnessTexture(gltf.Textures[pbr.MetallicRoughnessTexture.Index]);
@@ -186,27 +157,23 @@ internal class GltfLoader {
                 material.Roughness = pbr.RoughnessFactor;
                 material.Metallic = pbr.MetallicFactor;
             }
-            else if (gltfMaterial.Extensions.TryGetValue("KHR_materials_pbrSpecularGlossiness", out var extension)) {
-                var ext = (JObject) extension;
-
-                var diffuseTexture = ext["diffuseTexture"];
-                if (diffuseTexture != null) {
-                    material.AlbedoMap = GetRgbaTexture(gltf.Textures[diffuseTexture["index"].Value<uint>()]);
+            else if (gltfMaterial.TryGetExtension(out GltfPbrSpecularGlossinessExt ext)) {
+                if (ext.DiffuseTexture != null) {
+                    material.AlbedoMap = GetRgbaTexture(gltf.Textures[ext.DiffuseTexture.Index]);
                 }
 
-                var diffuse = ext["diffuseFactor"].Values<float>().ToArray();
-                material.Albedo = Rgba.From(diffuse);
+                material.Albedo = ext.DiffuseFactor;
             }
 
             material.AlphaCutoff = 0;
             material.Opaque = true;
 
             switch (gltfMaterial.AlphaMode) {
-                case GltfMaterial.AlphaModeEnum.MASK:
+                case GltfAlphaMode.Mask:
                     material.AlphaCutoff = gltfMaterial.AlphaCutoff + float.Epsilon;
                     break;
 
-                case GltfMaterial.AlphaModeEnum.BLEND:
+                case GltfAlphaMode.Blend:
                     material.Opaque = false;
                     break;
             }
@@ -219,7 +186,7 @@ internal class GltfLoader {
 
     private ITexture GetRgbaTexture(GltfTexture gltfTexture) {
         if (!rgbaTextures.TryGetValue(gltfTexture, out var texture)) {
-            var image = gltf.Images[gltfTexture.Source!.Value];
+            var image = gltfTexture.Image!;
             texture = new GltfRgbaTexture(gltf, gltfPath, image);
 
             rgbaTextures[gltfTexture] = texture;
@@ -230,7 +197,7 @@ internal class GltfLoader {
 
     private ITexture GetRoughnessTexture(GltfTexture gltfTexture) {
         if (!roughnessTextures.TryGetValue(gltfTexture, out var texture)) {
-            var image = gltf.Images[gltfTexture.Source!.Value];
+            var image = gltfTexture.Image!;
             texture = new GltfRoughnessMetallicTexture(gltf, gltfPath, image, 1);
 
             roughnessTextures[gltfTexture] = texture;
@@ -241,7 +208,7 @@ internal class GltfLoader {
 
     private ITexture GetMetallicTexture(GltfTexture gltfTexture) {
         if (!metallicTextures.TryGetValue(gltfTexture, out var texture)) {
-            var image = gltf.Images[gltfTexture.Source!.Value];
+            var image = gltfTexture.Image!;
             texture = new GltfRoughnessMetallicTexture(gltf, gltfPath, image, 2);
 
             metallicTextures[gltfTexture] = texture;
@@ -250,9 +217,8 @@ internal class GltfLoader {
         return texture;
     }
 
-    internal static Stream GetStream(Gltf gltf, string gltfPath, int viewI) {
-        var view = gltf.BufferViews[viewI];
-        var buffer = gltf.Buffers[view.Buffer];
+    internal static Stream GetStream(GltfFile gltf, string gltfPath, GltfBufferView view) {
+        var buffer = view.Buffer;
 
         var stream = GetStream(gltfPath, buffer);
         stream.Seek(view.ByteOffset, SeekOrigin.Current);
@@ -260,25 +226,25 @@ internal class GltfLoader {
         return stream;
     }
 
-    internal static Stream GetStream(Gltf gltf, string gltfPath, Accessor accessor) {
-        var stream = GetStream(gltf, gltfPath, accessor.BufferView!.Value);
+    internal static Stream GetStream(GltfFile gltf, string gltfPath, GltfAccessor accessor) {
+        var stream = GetStream(gltf, gltfPath, accessor.BufferView!);
         stream.Seek(accessor.ByteOffset, SeekOrigin.Current);
 
         return stream;
     }
 
-    internal static Stream GetStream(Gltf gltf, string gltfPath, GltfImage image) {
+    internal static Stream GetStream(GltfFile gltf, string gltfPath, GltfImage image) {
         // Buffer view
 
         if (image.BufferView != null)
-            return GetStream(gltf, gltfPath, image.BufferView!.Value);
+            return GetStream(gltf, gltfPath, image.BufferView!);
 
         // URI
 
-        return GetUriStream(gltfPath, image.Uri);
+        return GetUriStream(gltfPath, image.Uri!);
     }
 
-    private static Stream GetStream(string gltfPath, Buffer buffer) {
+    private static Stream GetStream(string gltfPath, GltfBuffer buffer) {
         // GLB Binary chunk
 
         if (buffer.Uri == null) {
@@ -354,11 +320,11 @@ internal class GltfLoader {
     }
 
     public static Model Load(string path) {
-        var gltf = Interface.LoadModel(path);
+        var gltf = GltfFile.Load(path)!;
         var loader = new GltfLoader(gltf, path);
 
-        foreach (var nodeI in gltf.Scenes[gltf.Scene ?? 0].Nodes) {
-            loader.Load(gltf.Nodes[nodeI], new Transform());
+        foreach (var node in gltf.Scenes[gltf.Scene ?? 0]) {
+            loader.Load(node, new Transform());
         }
 
         return loader.model;
@@ -366,16 +332,16 @@ internal class GltfLoader {
 }
 
 internal class GltfIMesh : IMesh {
-    private readonly Gltf gltf;
+    private readonly GltfFile gltf;
     private readonly string gltfPath;
 
-    private readonly Accessor? indexAccessor;
-    private readonly Accessor posAccessor;
-    private readonly Accessor uvAccessor;
-    private readonly Accessor? normalAccessor;
+    private readonly GltfAccessor? indexAccessor;
+    private readonly GltfAccessor posAccessor;
+    private readonly GltfAccessor uvAccessor;
+    private readonly GltfAccessor? normalAccessor;
 
-    public GltfIMesh(Gltf gltf, string gltfPath, Accessor? indexAccessor, Accessor posAccessor, Accessor uvAccessor,
-        Accessor? normalAccessor) {
+    public GltfIMesh(GltfFile gltf, string gltfPath, GltfAccessor? indexAccessor, GltfAccessor posAccessor, GltfAccessor uvAccessor,
+        GltfAccessor? normalAccessor) {
         this.gltf = gltf;
         this.gltfPath = gltfPath;
 
@@ -385,9 +351,9 @@ internal class GltfIMesh : IMesh {
         this.normalAccessor = normalAccessor;
     }
 
-    public uint? IndexCount => (uint?) indexAccessor?.Count;
+    public uint? IndexCount => indexAccessor?.Count;
 
-    public uint VertexCount => (uint) posAccessor.Count;
+    public uint VertexCount => posAccessor.Count;
 
     public unsafe void WriteIndices(Span<uint> indices) {
         if (indexAccessor == null)
@@ -396,7 +362,7 @@ internal class GltfIMesh : IMesh {
         using var stream = GltfLoader.GetStream(gltf, gltfPath, indexAccessor);
 
         switch (indexAccessor.ComponentType) {
-            case Accessor.ComponentTypeEnum.UNSIGNED_SHORT:
+            case GltfComponentType.UnsignedShort:
                 var buffered = new BufferedStream(stream);
 
                 ushort index = 0;
@@ -409,7 +375,7 @@ internal class GltfIMesh : IMesh {
 
                 break;
 
-            case Accessor.ComponentTypeEnum.UNSIGNED_INT:
+            case GltfComponentType.UnsignedInt:
                 stream.CopyToSize(
                     new UnmanagedMemoryStream(
                         (byte*) Utils.AsPtr(indices),
@@ -417,7 +383,7 @@ internal class GltfIMesh : IMesh {
                         indexAccessor.Count * 4,
                         FileAccess.Write
                     ),
-                    indexAccessor.Count * 4
+                    (int) (indexAccessor.Count * 4)
                 );
 
                 break;
@@ -441,21 +407,21 @@ internal class GltfIMesh : IMesh {
 }
 
 internal class AccessorEnumerable<T> : IEnumerable<T> where T : unmanaged {
-    private readonly Gltf gltf;
+    private readonly GltfFile gltf;
     private readonly string gltfPath;
-    private readonly Accessor accessor;
+    private readonly GltfAccessor accessor;
 
-    public AccessorEnumerable(Gltf gltf, string gltfPath, Accessor accessor) {
+    public AccessorEnumerable(GltfFile gltf, string gltfPath, GltfAccessor accessor) {
         this.gltf = gltf;
         this.gltfPath = gltfPath;
         this.accessor = accessor;
 
-        if ((int) Utils.SizeOf<T>() != (gltf.BufferViews[accessor.BufferView!.Value].ByteStride ?? (int) Utils.SizeOf<T>()))
+        if (Utils.SizeOf<T>() != (accessor.BufferView?.ByteStride ?? Utils.SizeOf<T>()))
             throw new Exception("Invalid GLTF buffer view stride");
     }
 
     public IEnumerator<T> GetEnumerator() {
-        return new StreamEnumerator<T>(GltfLoader.GetStream(gltf, gltfPath, accessor), (uint) accessor.Count);
+        return new StreamEnumerator<T>(GltfLoader.GetStream(gltf, gltfPath, accessor), accessor.Count);
     }
 
     IEnumerator IEnumerable.GetEnumerator() {
@@ -503,7 +469,7 @@ internal class StreamEnumerator<T> : IEnumerator<T> where T : unmanaged {
 }
 
 internal class GltfRgbaTexture : ITexture {
-    private readonly Gltf gltf;
+    private readonly GltfFile gltf;
     private readonly string gltfPath;
 
     private readonly GltfImage gltfImage;
@@ -511,7 +477,7 @@ internal class GltfRgbaTexture : ITexture {
     public TextureFormat Format => TextureFormat.Rgba;
     public Vector2D<uint> Size { get; }
 
-    public GltfRgbaTexture(Gltf gltf, string gltfPath, GltfImage gltfImage) {
+    public GltfRgbaTexture(GltfFile gltf, string gltfPath, GltfImage gltfImage) {
         this.gltf = gltf;
         this.gltfPath = gltfPath;
 
@@ -543,7 +509,7 @@ internal class GltfRgbaTexture : ITexture {
 }
 
 internal class GltfRoughnessMetallicTexture : ITexture {
-    private readonly Gltf gltf;
+    private readonly GltfFile gltf;
     private readonly string gltfPath;
 
     private readonly GltfImage gltfImage;
@@ -552,7 +518,7 @@ internal class GltfRoughnessMetallicTexture : ITexture {
     public TextureFormat Format => TextureFormat.R;
     public Vector2D<uint> Size { get; }
 
-    public GltfRoughnessMetallicTexture(Gltf gltf, string gltfPath, GltfImage gltfImage, int component) {
+    public GltfRoughnessMetallicTexture(GltfFile gltf, string gltfPath, GltfImage gltfImage, int component) {
         this.gltf = gltf;
         this.gltfPath = gltfPath;
 
