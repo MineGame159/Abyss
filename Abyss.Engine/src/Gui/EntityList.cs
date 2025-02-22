@@ -6,8 +6,6 @@ using Hexa.NET.ImGui;
 namespace Abyss.Engine.Gui;
 
 internal static class EntityList {
-    private static readonly QueryDescription allDesc = new();
-
     public static EntityReference SelectedEntity;
 
     public static void Render(World world) {
@@ -16,29 +14,47 @@ internal static class EntityList {
             return;
         }
 
-        world.Query(allDesc, entity => {
-            ImGui.PushID(entity.Id);
-
-            var name = GetEntityName(entity, out var visible);
-
-            if (!visible) {
-                ImGui.PushStyleColor(ImGuiCol.Text, ImGui.GetColorU32(ImGuiCol.TextDisabled));
-            }
-
-            var selected = SelectedEntity == entity;
-            var clicked = ImGui.Selectable(name, ref selected, ImGuiSelectableFlags.AllowDoubleClick);
-
-            if (selected) SelectedEntity = entity.Reference();
-            if (clicked && ImGuiP.IsMouseDoubleClicked(ImGuiMouseButton.Left)) ToggleVisibility();
-
-            if (!visible) {
-                ImGui.PopStyleColor();
-            }
-
-            ImGui.PopID();
-        });
+        foreach (var entity in world.GetRootEntity().Children()) {
+            RenderEntity(entity);
+        }
 
         ImGui.End();
+    }
+
+    private static void RenderEntity(Entity entity) {
+        ImGui.PushID(entity.Id);
+
+        var name = GetEntityName(entity, out var visible);
+
+        if (!visible) {
+            ImGui.PushStyleColor(ImGuiCol.Text, ImGui.GetColorU32(ImGuiCol.TextDisabled));
+        }
+
+        var selected = SelectedEntity == entity;
+
+        var flags = ImGuiTreeNodeFlags.OpenOnArrow | ImGuiTreeNodeFlags.OpenOnDoubleClick;
+        if (selected) flags |= ImGuiTreeNodeFlags.Selected;
+        if (entity.IsLeaf()) flags |= ImGuiTreeNodeFlags.Bullet | ImGuiTreeNodeFlags.Leaf;
+
+        var expanded = ImGui.TreeNodeEx(name, flags);
+        if ((ImGui.IsItemClicked() || ImGui.IsItemClicked(ImGuiMouseButton.Right)) && !ImGui.IsItemToggledOpen()) selected = !selected;
+
+        if (selected) SelectedEntity = entity.Reference();
+        if (ImGui.IsItemClicked(ImGuiMouseButton.Right) && !ImGui.IsItemToggledOpen()) ToggleVisibility();
+
+        if (!visible) {
+            ImGui.PopStyleColor();
+        }
+
+        if (expanded) {
+            foreach (var child in entity.Children()) {
+                RenderEntity(child);
+            }
+
+            ImGui.TreePop();
+        }
+
+        ImGui.PopID();
     }
 
     private static void ToggleVisibility() {

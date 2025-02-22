@@ -17,6 +17,8 @@ internal static class AbyssGui {
 
         style.WindowRounding = 3;
         style.FrameRounding = 3;
+
+        style.IndentSpacing = 12;
     }
 
     public static void Render() {

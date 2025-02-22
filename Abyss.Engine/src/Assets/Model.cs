@@ -5,7 +5,7 @@ using Arch.Core;
 namespace Abyss.Engine.Assets;
 
 public class Model {
-    public readonly List<(string, Transform, MeshInstance?, PointLight?, DirectionalLight?)> Entities = [];
+    internal readonly List<EntityInfo> Infos = [];
 
     internal Model() { }
 
@@ -17,18 +17,41 @@ public class Model {
     }
 
     public void Spawn(World world, Transform transform) {
-        foreach (var entity in Entities) {
-            var entityTransform = transform;
-            entityTransform.Apply(entity.Item2);
+        var root = world.GetRootEntity();
 
-            var info = new Info(entity.Item1);
-
-            if (entity.Item3 != null)
-                world.Create(info, entityTransform, entity.Item3!.Value);
-            else if (entity.Item4 != null)
-                world.Create(info, entityTransform, entity.Item4!.Value);
-            else if (entity.Item5 != null)
-                world.Create(info, entityTransform, entity.Item5!.Value);
+        foreach (var info in Infos) {
+            SpawnEntity(world, root, info, transform);
         }
+    }
+
+    private static void SpawnEntity(World world, Entity parent, EntityInfo info, Transform transform) {
+        var entityTransform = transform;
+        entityTransform.Apply(info.Transform);
+
+        var entity = default(Entity);
+
+        if (info.Instance != null)
+            entity = world.Spawn(entityTransform, info.Instance!.Value, parent: parent, name: info.Name);
+        else if (info.PointLight != null)
+            entity = world.Spawn(entityTransform, info.PointLight!.Value, parent: parent, name: info.Name);
+        else if (info.DirectionalLight != null)
+            entity = world.Spawn(entityTransform, info.DirectionalLight!.Value, parent: parent, name: info.Name);
+        else
+            entity = world.Spawn(entityTransform, parent: parent, name: info.Name);
+
+        foreach (var childInfo in info.Children) {
+            SpawnEntity(world, entity, childInfo, new Transform());
+        }
+    }
+
+    internal class EntityInfo {
+        public string Name;
+
+        public Transform Transform;
+        public MeshInstance? Instance;
+        public PointLight? PointLight;
+        public DirectionalLight? DirectionalLight;
+
+        public List<EntityInfo> Children;
     }
 }

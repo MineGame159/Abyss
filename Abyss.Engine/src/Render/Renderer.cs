@@ -123,7 +123,7 @@ public class Renderer : BaseSystem<World, float> {
 
         lights.Clear();
 
-        World.Query<Transform>(lightEntityDesc, CollectEntityLight);
+        World.Query(lightEntityDesc, CollectEntityLight);
 
         lights.Upload(commandBuffer);
 
@@ -240,7 +240,7 @@ public class Renderer : BaseSystem<World, float> {
         return m;
     }
 
-    private void CollectEntityLight(Entity entity, ref Transform transform) {
+    private void CollectEntityLight(Entity entity) {
         if (entity.TryGet(out Info info) && !info.Visible)
             return;
 
@@ -248,7 +248,7 @@ public class Renderer : BaseSystem<World, float> {
             lights.Add(new GpuLight {
                 Type = GpuLightType.Point,
                 Color = point.Color * point.Intensity,
-                Data = transform.Position
+                Data = WorldTransforms.Get(entity)!.Value.Position
             });
         }
         else {
@@ -272,7 +272,7 @@ public class Renderer : BaseSystem<World, float> {
     }
 
     private void RenderEntity(Entity entity) {
-        ref var transform = ref entity.Get<Transform>();
+        var transform = WorldTransforms.Get(entity)!.Value;
         ref var instance = ref entity.Get<MeshInstance>();
 
         var mesh = GetMesh(instance.Mesh);

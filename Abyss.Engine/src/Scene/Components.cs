@@ -1,12 +1,18 @@
 using System.Numerics;
 using Abyss.Engine.Assets;
 using Abyss.Engine.Gui;
+using Arch.Core;
 
 namespace Abyss.Engine.Scene;
+
+public record struct Root;
 
 public record struct Info {
     public string Name;
     public bool Visible;
+
+    public Entity? Parent;
+    public List<Entity>? Children;
 
     public Info(string name, bool visible = true) {
         Name = name;

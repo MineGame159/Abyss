@@ -14,28 +14,23 @@ public class Program : Application {
     private float yaw, pitch;
 
     protected override void Init() {
-        var model = Model.Load("models/cityscene.glb");
+        var model = Model.Load("models/mando_helmet.glb");
 
         model.Spawn(World, new Transform {
             Scale = new Vector3(1)
         });
 
-        Console.WriteLine("Entities: " + model.Entities.Count);
-        Console.WriteLine("Meshes: " + model.Entities.Select(tuple => tuple.Item3?.Mesh).Where(m => m != null).Distinct().Count());
-        Console.WriteLine("Materials: " + model.Entities.Select(tuple => tuple.Item3?.Material).Where(m => m != null).Distinct().Count());
-
-        camera = World.Create(
-            new Info("Camera"),
+        camera = World.Spawn(
             new Transform {
                 Position = new Vector3(0, 0, 0)
             },
             new Camera(75, 0.1f, 2048, new WorldEnvironment {
                 ClearColor = new Vector3(0.75f)
-            })
+            }),
+            name: "Camera"
         );
 
-        World.Create(
-            new Info("Light"),
+        World.Spawn(
             new Transform {
                 Position = new Vector3(5)
             },
@@ -43,7 +38,8 @@ public class Program : Application {
                 Direction = new Vector3(1.3f, -2.9f, -2.5f),
                 Color = new Vector3(1),
                 Intensity = 6
-            }
+            },
+            name: "Light"
         );
     }
 

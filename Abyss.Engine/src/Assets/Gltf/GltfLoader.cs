@@ -16,8 +16,6 @@ internal class GltfLoader {
     private readonly GltfFile gltf;
     private readonly string gltfPath;
 
-    private readonly Model model = new();
-
     private readonly Dictionary<(int?, int, int, int?), IMesh> meshes = [];
 
     private Material? defaultMaterial;
@@ -32,9 +30,12 @@ internal class GltfLoader {
         this.gltfPath = gltfPath;
     }
 
-    private void Load(GltfNode node, Transform transform) {
-        var localTransform = GetLocalTransform(node);
-        transform.Apply(localTransform);
+    private Model.EntityInfo Load(GltfNode node) {
+        var info = new Model.EntityInfo {
+            Name = node.Name ?? "",
+            Transform = GetLocalTransform(node),
+            Children = []
+        };
 
         if (node.Mesh != null) {
             foreach (var primitive in node.Mesh.Primitives) {
@@ -52,7 +53,7 @@ internal class GltfLoader {
                 var mesh = GetMesh(primitive.Indices, posI, texCoordI, normalI);
                 var material = GetMaterial(primitive.Material);
 
-                model.Entities.Add((node.Name, transform, new MeshInstance(mesh, material), null, null));
+                info.Instance = new MeshInstance(mesh, material);
             }
         }
         else if (node.TryGetExtension(out GltfLightsPunctualExt ext)) {
@@ -63,15 +64,15 @@ internal class GltfLoader {
                     var color = light.Color;
                     var intensity = light.Intensity / 1000;
 
-                    model.Entities.Add((node.Name, transform, null, new PointLight(color, intensity), null));
+                    info.PointLight = new PointLight(color, intensity);
                     break;
                 }
                 case GltfLightType.Directional: {
                     var color = light.Color;
                     var intensity = light.Intensity / 1000;
-                    var direction = Vector3.Transform(new Vector3(0, 0, -1), transform.Matrix);
+                    var direction = Vector3.Transform(new Vector3(0, 0, -1), info.Transform.Matrix);
 
-                    model.Entities.Add((node.Name, transform, null, null, new DirectionalLight(direction, color, intensity)));
+                    info.DirectionalLight = new DirectionalLight(direction, color, intensity);
                     break;
                 }
                 default:
@@ -80,8 +81,10 @@ internal class GltfLoader {
         }
 
         foreach (var child in node) {
-            Load(child, transform);
+            info.Children.Add(Load(child));
         }
+
+        return info;
     }
 
     private Transform GetLocalTransform(GltfNode node) {
@@ -327,11 +330,13 @@ internal class GltfLoader {
         var gltf = GltfFile.Load(path)!;
         var loader = new GltfLoader(gltf, path);
 
+        var model = new Model();
+
         foreach (var node in gltf.Scenes[gltf.Scene ?? 0]) {
-            loader.Load(node, new Transform());
+            model.Infos.Add(loader.Load(node));
         }
 
-        return loader.model;
+        return model;
     }
 }
 

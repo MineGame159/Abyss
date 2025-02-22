@@ -1,5 +1,6 @@
 using Abyss.Engine.Gui;
 using Abyss.Engine.Render;
+using Abyss.Engine.Scene;
 using Abyss.Gpu;
 using Arch.Core;
 using Arch.System;
@@ -65,6 +66,8 @@ public abstract class Application {
         ImGuiImpl.Init(Ctx);
         AbyssGui.Init(World);
 
+        World.Create(new Root(), new Info("<root>"));
+
         Init();
     }
 
@@ -84,6 +87,7 @@ public abstract class Application {
         Ctx.CommandPool.Reset();
 
         Update((float) delta);
+        WorldTransforms.Update(World);
 
         var commandBuffer = Ctx.CommandPool.Get();
         commandBuffer.Begin();
