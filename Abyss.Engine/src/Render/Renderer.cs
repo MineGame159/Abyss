@@ -327,6 +327,9 @@ public class Renderer : BaseSystem<World, float> {
                 Metallic = asset.Metallic,
                 MetallicTextureI = GetTextureIndex(asset.MetallicMap),
 
+                Emissive = asset.Emissive,
+                EmissiveTextureI = GetTextureIndex(asset.EmissiveMap),
+
                 Alpha = asset.Albedo.W,
                 AlphaCutoff = asset.AlphaCutoff,
                 Opaque = asset.Opaque ? 1u : 0u
@@ -429,6 +432,9 @@ public class Renderer : BaseSystem<World, float> {
 
         public float Metallic;
         public uint MetallicTextureI;
+
+        public Vector3 Emissive;
+        public uint EmissiveTextureI;
 
         public float Alpha;
         public float AlphaCutoff;

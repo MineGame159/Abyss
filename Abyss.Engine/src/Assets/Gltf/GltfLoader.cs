@@ -143,27 +143,22 @@ internal class GltfLoader {
             if (gltfMaterial.PbrMetallicRoughness != null) {
                 var pbr = gltfMaterial.PbrMetallicRoughness;
 
-                if (pbr.BaseColorTexture != null) {
-                    material.AlbedoMap = GetRgbaTexture(gltf.Textures[pbr.BaseColorTexture.Index]);
-                }
-
+                material.AlbedoMap = GetRgbaTexture(pbr.BaseColorTexture?.Texture);
                 material.Albedo = pbr.BaseColorFactor;
 
-                if (pbr.MetallicRoughnessTexture != null) {
-                    material.RoughnessMap = GetRoughnessTexture(gltf.Textures[pbr.MetallicRoughnessTexture.Index]);
-                    material.MetallicMap = GetMetallicTexture(gltf.Textures[pbr.MetallicRoughnessTexture.Index]);
-                }
-
+                material.RoughnessMap = GetRoughnessTexture(pbr.MetallicRoughnessTexture?.Texture);
                 material.Roughness = pbr.RoughnessFactor;
+
+                material.MetallicMap = GetMetallicTexture(pbr.MetallicRoughnessTexture?.Texture);
                 material.Metallic = pbr.MetallicFactor;
             }
             else if (gltfMaterial.TryGetExtension(out GltfPbrSpecularGlossinessExt ext)) {
-                if (ext.DiffuseTexture != null) {
-                    material.AlbedoMap = GetRgbaTexture(gltf.Textures[ext.DiffuseTexture.Index]);
-                }
-
+                material.AlbedoMap = GetRgbaTexture(ext.DiffuseTexture?.Texture);
                 material.Albedo = ext.DiffuseFactor;
             }
+
+            material.EmissiveMap = GetRgbaTexture(gltfMaterial.EmissiveTexture?.Texture);
+            material.Emissive = gltfMaterial.EmissiveFactor;
 
             material.AlphaCutoff = 0;
             material.Opaque = true;
@@ -184,7 +179,10 @@ internal class GltfLoader {
         return material;
     }
 
-    private ITexture GetRgbaTexture(GltfTexture gltfTexture) {
+    private ITexture? GetRgbaTexture(GltfTexture? gltfTexture) {
+        if (gltfTexture == null)
+            return null;
+
         if (!rgbaTextures.TryGetValue(gltfTexture, out var texture)) {
             var image = gltfTexture.Image!;
             texture = new GltfRgbaTexture(gltf, gltfPath, image);
@@ -195,7 +193,10 @@ internal class GltfLoader {
         return texture;
     }
 
-    private ITexture GetRoughnessTexture(GltfTexture gltfTexture) {
+    private ITexture? GetRoughnessTexture(GltfTexture? gltfTexture) {
+        if (gltfTexture == null)
+            return null;
+
         if (!roughnessTextures.TryGetValue(gltfTexture, out var texture)) {
             var image = gltfTexture.Image!;
             texture = new GltfRoughnessMetallicTexture(gltf, gltfPath, image, 1);
@@ -206,7 +207,10 @@ internal class GltfLoader {
         return texture;
     }
 
-    private ITexture GetMetallicTexture(GltfTexture gltfTexture) {
+    private ITexture? GetMetallicTexture(GltfTexture? gltfTexture) {
+        if (gltfTexture == null)
+            return null;
+
         if (!metallicTextures.TryGetValue(gltfTexture, out var texture)) {
             var image = gltfTexture.Image!;
             texture = new GltfRoughnessMetallicTexture(gltf, gltfPath, image, 2);

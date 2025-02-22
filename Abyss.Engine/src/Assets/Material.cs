@@ -26,6 +26,13 @@ public class Material {
     [InspectorFloat(0.005f, 0, 1)]
     public float Metallic;
     
+    // Emissive
+
+    public ITexture? EmissiveMap;
+
+    [InspectorFloat(0.005f, 0)]
+    public Vector3 Emissive;
+
     // Alpha
 
     [InspectorFloat(0.005f, 0, 1)]

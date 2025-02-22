@@ -23,6 +23,9 @@ struct Material {
     float metallic;
     uint metallicTextureI;
 
+    float3 emissive;
+    uint emissiveTextureI;
+
     float alpha;
     float alphaCutoff;
     uint opaque;
@@ -82,8 +85,9 @@ float4 fragment(float3 pos, float2 uv, float3 normal) {
 
     let material = materials[draw.materialI];
 
+    var emissive = float3(0.0);
     var alpha = 1.0;
-    let pbrMat = GetPbrMaterial(uv, material, alpha);
+    let pbrMat = GetPbrMaterial(uv, material, emissive, alpha);
 
     // Lighting
 
@@ -105,13 +109,13 @@ float4 fragment(float3 pos, float2 uv, float3 normal) {
 
     let ambient = float3(0.03) * pbrMat.albedo;
 
-    var color = ambient + Lo;
+    var color = ambient + Lo + emissive;
     color = Uncharted2Filmic(color);
 
     return float4(color, alpha);
 }
 
-PbrMaterial GetPbrMaterial(float2 uv, Material material, out float alpha) {
+PbrMaterial GetPbrMaterial(float2 uv, Material material, out float3 emissive, out float alpha) {
     PbrMaterial pbrMat;
 
     // Albedo & Alpha
@@ -146,6 +150,14 @@ PbrMaterial GetPbrMaterial(float2 uv, Material material, out float alpha) {
 
     if (material.metallicTextureI != 0) {
         pbrMat.metallic *= textures[material.metallicTextureI - 1].Sample(uv).r;
+    }
+
+    // Emissive
+
+    emissive = material.emissive;
+
+    if (material.emissiveTextureI != 0) {
+        emissive *= ToLinear(textures[material.emissiveTextureI - 1].Sample(uv).rgb);
     }
 
     return pbrMat;
