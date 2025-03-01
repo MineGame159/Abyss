@@ -1,6 +1,5 @@
 import "lib/light";
 import "lib/pbr";
-import "lib/tonemap";
 import "lib/utils";
 
 struct FrameUniforms {
@@ -108,9 +107,7 @@ float4 fragment(float3 pos, float2 uv, float3 normal) {
     // Result
 
     let ambient = float3(0.03) * pbrMat.albedo;
-
-    var color = ambient + Lo + emissive;
-    color = Uncharted2Filmic(color);
+    let color = ambient + Lo + emissive;
 
     return float4(color, alpha);
 }

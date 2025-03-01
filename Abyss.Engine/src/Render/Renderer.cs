@@ -29,7 +29,8 @@ public class Renderer : BaseSystem<World, float> {
 
     public readonly GpuContext Ctx;
 
-    private readonly GpuGraphicsPipeline pipeline;
+    private readonly GpuGraphicsPipeline meshPipeline;
+    private readonly GpuGraphicsPipeline compositePipeline;
 
     private readonly Dictionary<IMesh, Mesh> meshes = [];
 
@@ -47,8 +48,11 @@ public class Renderer : BaseSystem<World, float> {
     private readonly Sampler sampler;
 
     private GpuCommandBuffer commandBuffer = null!;
-    private GpuImage output = null!;
+    private GpuImage color = null!;
     private GpuImage depth = null!;
+    private GpuImage output = null!;
+
+    private Bloom? bloom;
 
     public Matrix4x4 ProjectionMatrix { get; private set; }
     public Matrix4x4 ViewMatrix { get; private set; }
@@ -56,7 +60,7 @@ public class Renderer : BaseSystem<World, float> {
     public Renderer(World world, GpuContext ctx) : base(world) {
         this.Ctx = ctx;
 
-        pipeline = ctx.Pipelines.Create(new GpuGraphicsPipelineOptions(
+        meshPipeline = ctx.Pipelines.Create(new GpuGraphicsPipelineOptions(
             PrimitiveTopology.TriangleList,
             GpuShaderModule.FromResource("Abyss.Engine.shaders.bin.mesh.spv"),
             GpuShaderModule.FromResource("Abyss.Engine.shaders.bin.mesh.spv"),
@@ -66,7 +70,7 @@ public class Renderer : BaseSystem<World, float> {
                 new VertexAttribute(VertexAttributeType.Float, 3, false)
             ]),
             [
-                new ColorAttachment(ctx.Swapchain.Images[0].Format, true)
+                new ColorAttachment(Format.R16G16B16A16Sfloat, BlendMode.Alpha)
             ],
             new DepthAttachment(Format.D32Sfloat, CompareOp.LessOrEqual, true),
             ctx.Pipelines.GetLayout(
@@ -74,6 +78,16 @@ public class Renderer : BaseSystem<World, float> {
                 ctx.Descriptors.GetLayout(DescriptorType.UniformBuffer, DescriptorType.StorageBuffer, DescriptorType.StorageBuffer),
                 ctx.Descriptors.GetLayout(new DescriptorInfo(DescriptorType.ImageSampler, 128))
             )
+        ));
+
+        compositePipeline = ctx.Pipelines.Create(new GpuGraphicsPipelineOptions(
+            PrimitiveTopology.TriangleList,
+            GpuShaderModule.FromResource("Abyss.Engine.shaders.bin.fullscreen.spv"),
+            GpuShaderModule.FromResource("Abyss.Engine.shaders.bin.composite.spv"),
+            new VertexFormat([]),
+            [
+                new ColorAttachment(ctx.Swapchain.Images[0].Format, null)
+            ]
         ));
 
         lights = new GrowableStorageBuffer<GpuLight>(ctx, 64);
@@ -91,6 +105,15 @@ public class Renderer : BaseSystem<World, float> {
 
         // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
         if (depth == null || depth.Size != output.Size) {
+            // ReSharper disable once ConditionalAccessQualifierIsNonNullableAccordingToAPIContract
+            color?.Dispose();
+
+            color = Ctx.CreateImage(
+                output.Size,
+                ImageUsageFlags.ColorAttachmentBit | ImageUsageFlags.SampledBit,
+                Format.R16G16B16A16Sfloat
+            );
+
             depth?.Dispose();
 
             depth = Ctx.CreateImage(
@@ -103,9 +126,9 @@ public class Renderer : BaseSystem<World, float> {
 
     public override void Update(in float t) {
         commandBuffer.TransitionImage(
-            output,
-            ImageLayout.PresentSrcKhr,
-            PipelineStageFlags.BottomOfPipeBit, AccessFlags.None,
+            color,
+            ImageLayout.ColorAttachmentOptimal,
+            PipelineStageFlags.TopOfPipeBit, AccessFlags.None,
             PipelineStageFlags.ColorAttachmentOutputBit, AccessFlags.ColorAttachmentWriteBit
         );
 
@@ -117,9 +140,16 @@ public class Renderer : BaseSystem<World, float> {
             AccessFlags.DepthStencilAttachmentReadBit | AccessFlags.DepthStencilAttachmentWriteBit
         );
 
+        commandBuffer.TransitionImage(
+            output,
+            ImageLayout.PresentSrcKhr,
+            PipelineStageFlags.BottomOfPipeBit, AccessFlags.None,
+            PipelineStageFlags.ColorAttachmentOutputBit, AccessFlags.ColorAttachmentWriteBit
+        );
+
         // Uniforms
 
-        var frameUniforms = GetFrameUniforms(out var clearColor);
+        var frameUniforms = GetFrameUniforms(out var env);
         var frameUniformsBuffer = Ctx.FrameAllocator.Allocate(BufferUsageFlags.UniformBufferBit, frameUniforms);
 
         // Collect lights
@@ -148,11 +178,11 @@ public class Renderer : BaseSystem<World, float> {
         // Render entities
 
         commandBuffer.BeginRenderPass(
-            new Attachment(output, AttachmentLoadOp.Clear, AttachmentStoreOp.Store, new Vector4(clearColor, 1)),
+            new Attachment(color, AttachmentLoadOp.Clear, AttachmentStoreOp.Store, new Vector4(env.ClearColor, 1)),
             new Attachment(depth, AttachmentLoadOp.Clear, AttachmentStoreOp.Store, new Vector4(1))
         );
 
-        commandBuffer.BindPipeline(pipeline);
+        commandBuffer.BindPipeline(meshPipeline);
 
         commandBuffer.BindDescriptorSet(0, frameUniformsBuffer, lights.Buffer, materials.Buffer);
         commandBuffer.BindDescriptorSet(1, textures.Set, ReadOnlySpan<uint>.Empty);
@@ -173,6 +203,33 @@ public class Renderer : BaseSystem<World, float> {
         commandBuffer.EndGroup();
 
         commandBuffer.EndRenderPass();
+
+        // Bloom
+
+        if (env.Bloom) {
+            bloom ??= new Bloom(Ctx);
+            bloom.Render(commandBuffer, color, env);
+        }
+
+        // Composite
+
+        commandBuffer.TransitionImage(
+            color,
+            ImageLayout.ShaderReadOnlyOptimal,
+            PipelineStageFlags.ColorAttachmentOutputBit, AccessFlags.ColorAttachmentWriteBit,
+            PipelineStageFlags.FragmentShaderBit, AccessFlags.ShaderReadBit
+        );
+
+        commandBuffer.BeginGroup("Composite");
+        commandBuffer.BeginRenderPass(new Attachment(output, AttachmentLoadOp.DontCare, AttachmentStoreOp.Store, null));
+        
+        commandBuffer.BindPipeline(compositePipeline);
+        commandBuffer.BindDescriptorSet(0, new GpuImageSampler(color, sampler));
+
+        commandBuffer.Draw(3);
+
+        commandBuffer.EndRenderPass();
+        commandBuffer.EndGroup();
 
         return;
 
@@ -197,7 +254,7 @@ public class Renderer : BaseSystem<World, float> {
         }
     }
 
-    private FrameUniforms GetFrameUniforms(out Vector3 clearColor) {
+    private FrameUniforms GetFrameUniforms(out WorldEnvironment env) {
         var uniforms = new FrameUniforms {
             LightCount = lights.Count
         };
@@ -214,14 +271,14 @@ public class Renderer : BaseSystem<World, float> {
 
             uniforms.CameraPos = transform.Position;
 
-            clearColor = camera.Environment.ClearColor;
+            env = camera.Environment;
 
             var aspect = (float) output.Size.X / output.Size.Y;
             ProjectionMatrix = Matrix4x4.CreatePerspectiveFieldOfView(Utils.DegToRad(camera.Fov), aspect, camera.Near, camera.Far);
             ViewMatrix = uniforms.View;
         }
         else {
-            clearColor = Vector3.One;
+            env = new WorldEnvironment();
         }
 
         return uniforms;

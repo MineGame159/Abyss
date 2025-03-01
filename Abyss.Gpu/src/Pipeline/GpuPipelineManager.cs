@@ -123,15 +123,21 @@ public class GpuPipelineManager {
         Span<PipelineColorBlendAttachmentState> colorAttachmentBlends =
             stackalloc PipelineColorBlendAttachmentState[options.ColorAttachments.Length];
 
-        for (var i = 0; i < colorAttachmentBlends.Length; i++)
+        for (var i = 0; i < colorAttachmentBlends.Length; i++) {
             colorAttachmentBlends[i] = new PipelineColorBlendAttachmentState(
-                options.ColorAttachments[i].Blend,
-                BlendFactor.SrcAlpha,
-                BlendFactor.OneMinusSrcAlpha,
-                srcAlphaBlendFactor: BlendFactor.One,
-                dstAlphaBlendFactor: BlendFactor.Zero,
+                options.ColorAttachments[i].Blend != null,
                 colorWriteMask: ColorComponentFlags.RBit | ColorComponentFlags.GBit | ColorComponentFlags.BBit | ColorComponentFlags.ABit
             );
+
+            if (options.ColorAttachments[i].Blend != null) {
+                var mode = options.ColorAttachments[i].Blend!.Value;
+
+                colorAttachmentBlends[i].SrcColorBlendFactor = mode.SrcColor;
+                colorAttachmentBlends[i].DstColorBlendFactor = mode.DstColor;
+                colorAttachmentBlends[i].SrcAlphaBlendFactor = mode.SrcAlpha;
+                colorAttachmentBlends[i].DstAlphaBlendFactor = mode.DstAlpha;
+            }
+        }
 
         var colorBlendInfo = new PipelineColorBlendStateCreateInfo(
             attachmentCount: (uint) colorAttachmentBlends.Length,

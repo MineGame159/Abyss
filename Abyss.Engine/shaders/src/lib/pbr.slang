@@ -40,7 +40,7 @@ float DistributionGGX(float3 N, float3 H, float roughness) {
     var denom = (NdotH2 * (a2 - 1.0) + 1.0);
     denom = float.getPi() * denom * denom;
 
-    return num / denom;
+    return num / max(denom, 0.00001);
 }
 
 float GeometrySchlickGGX(float NdotV, float roughness) {

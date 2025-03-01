@@ -247,7 +247,7 @@ public static class ImGuiImpl {
                 new VertexAttribute(VertexAttributeType.UByte, 4, true)
             ]),
             [
-                new ColorAttachment(format, true),
+                new ColorAttachment(format, BlendMode.Alpha),
             ],
             Layout: ctx.Pipelines.GetLayout(
                 (uint) Utils.SizeOf<DrawData>(),

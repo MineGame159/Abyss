@@ -30,6 +30,15 @@
       <EmbeddedResource Include="shaders\bin\mesh.spv" />
       <None Remove="shaders\bin\imgui.spv" />
       <EmbeddedResource Include="shaders\bin\imgui.spv" />
+      <None Remove="shaders\bin\fullscreen.spv" />
+      <EmbeddedResource Include="shaders\bin\fullscreen.spv" />
+      <None Remove="shaders\bin\bloom_upsample.spv" />
+      <EmbeddedResource Include="shaders\bin\bloom_upsample.spv" />
+      <None Remove="shaders\bin\bloom_downsample.spv" />
+      <EmbeddedResource Include="shaders\bin\bloom_downsample.spv" />
+      <None Remove="shaders\bin\composite.spv" />
+      <EmbeddedResource Include="shaders\bin\composite.spv" />
+      <None Remove="shaders\bin\bloom_downsample_filter.spv" />
     </ItemGroup>
 
 </Project>

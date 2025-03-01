@@ -23,6 +23,11 @@ public readonly record struct GpuGraphicsPipelineOptions(
     PipelineLayout? Layout = null
 );
 
-public readonly record struct ColorAttachment(Format Format, bool Blend);
+public readonly record struct BlendMode(BlendFactor SrcColor, BlendFactor DstColor, BlendFactor SrcAlpha, BlendFactor DstAlpha) {
+    public static readonly BlendMode Alpha = new(BlendFactor.SrcAlpha, BlendFactor.OneMinusSrcAlpha, BlendFactor.One, BlendFactor.Zero);
+    public static readonly BlendMode Additive = new(BlendFactor.One, BlendFactor.One, BlendFactor.One, BlendFactor.Zero);
+}
+
+public readonly record struct ColorAttachment(Format Format, BlendMode? Blend);
 
 public readonly record struct DepthAttachment(Format Format, CompareOp Compare, bool Write);

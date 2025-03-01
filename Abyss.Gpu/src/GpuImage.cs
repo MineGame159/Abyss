@@ -86,7 +86,10 @@ public readonly record struct GpuImageSampler(GpuImage Image, Sampler Sampler) :
     public DescriptorInfo DescriptorInfo => DescriptorType.ImageSampler;
 
     public bool DescriptorEquals(IDescriptor other) {
-        return Equals(other);
+        if (other is GpuImageSampler o)
+            return Image.DescriptorEquals(o.Image) && Sampler.Handle == o.Sampler.Handle;
+
+        return false;
     }
 
     public int DescriptorHashCode() {
