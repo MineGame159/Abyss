@@ -396,7 +396,9 @@ public class Renderer : BaseSystem<World, float> {
 
                 Alpha = asset.Albedo.W,
                 AlphaCutoff = asset.AlphaCutoff,
-                Opaque = asset.Opaque ? 1u : 0u
+                Opaque = asset.Opaque ? 1u : 0u,
+
+                NormalTextureI = GetTextureIndex(asset.NormalMap)
             };
 
             index = materials.Add(material);
@@ -504,8 +506,7 @@ public class Renderer : BaseSystem<World, float> {
         public float AlphaCutoff;
         public uint Opaque;
 
-        [DebuggerBrowsable(DebuggerBrowsableState.Never)]
-        private uint _0;
+        public uint NormalTextureI;
     }
 
     [StructLayout(LayoutKind.Sequential)]

@@ -39,4 +39,8 @@ public class Material {
     public float AlphaCutoff;
 
     public bool Opaque;
+
+    // Normal
+
+    public ITexture? NormalMap;
 }

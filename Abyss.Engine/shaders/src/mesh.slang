@@ -28,6 +28,8 @@ struct Material {
     float alpha;
     float alphaCutoff;
     uint opaque;
+
+    uint normalTextureI;
 }
 
 struct DrawData {
@@ -87,6 +89,12 @@ float4 fragment(float3 pos, float2 uv, float3 normal) {
     var emissive = float3(0.0);
     var alpha = 1.0;
     let pbrMat = GetPbrMaterial(uv, material, emissive, alpha);
+
+    // Normal
+
+    if (material.normalTextureI != 0) {
+        normal = GetNormalFromNormalTexture(material.normalTextureI, uv, pos, normal);
+    }
 
     // Lighting
 
@@ -158,4 +166,20 @@ PbrMaterial GetPbrMaterial(float2 uv, Material material, out float3 emissive, ou
     }
 
     return pbrMat;
+}
+
+float3 GetNormalFromNormalTexture(uint textureI, float2 uv, float3 pos, float3 normal) {
+    let tangentNormal = textures[textureI - 1].Sample(uv).xyz * 2.0 - 1.0;
+
+    let Q1 = ddx(pos);
+    let Q2 = ddy(pos);
+    let st1 = ddx(uv);
+    let st2 = ddy(uv);
+
+    let N = normalize(normal);
+    let T = normalize(Q1 * st2.y - Q2 * st1.y);
+    let B = -normalize(cross(N, T));
+    let TBN = float3x3(T, B, N);
+
+    return normalize(mul(tangentNormal, TBN));
 }

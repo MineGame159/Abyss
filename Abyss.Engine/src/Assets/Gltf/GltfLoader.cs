@@ -166,6 +166,8 @@ internal class GltfLoader {
             material.AlphaCutoff = 0;
             material.Opaque = true;
 
+            material.NormalMap = GetRgbaTexture(gltfMaterial.NormalTexture?.Texture);
+
             switch (gltfMaterial.AlphaMode) {
                 case GltfAlphaMode.Mask:
                     material.AlphaCutoff = gltfMaterial.AlphaCutoff + float.Epsilon;
