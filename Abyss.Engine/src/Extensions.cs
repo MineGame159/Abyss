@@ -164,6 +164,11 @@ public static class EntityExt {
         info.Children.Add(child);
     }
 
+    public static Entity? Parent(this Entity entity) {
+        ref var info = ref entity.Get<Info>();
+        return info.Parent;
+    }
+
     public static IEnumerable<Entity> Children(this Entity entity) {
         ref var info = ref entity.Get<Info>();
         return info.Children ?? Enumerable.Empty<Entity>();

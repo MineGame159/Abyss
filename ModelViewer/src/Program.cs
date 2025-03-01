@@ -14,7 +14,7 @@ public class Program : Application {
     private float yaw, pitch;
 
     protected override void Init() {
-        var model = Model.Load("models/mando_helmet.glb");
+        var model = Model.Load("models/cityscene.glb");
 
         model.Spawn(World, new Transform {
             Scale = new Vector3(1)

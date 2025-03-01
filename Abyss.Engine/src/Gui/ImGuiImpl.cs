@@ -4,6 +4,7 @@ using Abyss.Core;
 using Abyss.Gpu;
 using Abyss.Gpu.Pipeline;
 using Hexa.NET.ImGui;
+using Hexa.NET.ImGuizmo;
 using Silk.NET.Core.Native;
 using Silk.NET.Input;
 using Silk.NET.Maths;
@@ -77,6 +78,10 @@ public static class ImGuiImpl {
         }
 
         CreateGpuResources(ctx);
+
+        // Other
+
+        ImGuizmo.SetImGuiContext(ImGui.GetCurrentContext());
     }
 
     public static bool CapturesKeys => ImGui.GetIO().WantCaptureKeyboard;
@@ -92,6 +97,7 @@ public static class ImGuiImpl {
         UpdateKeyModifiers();
 
         ImGui.NewFrame();
+        ImGuizmo.BeginFrame();
     }
 
     private static void UpdateMouseCursor() {

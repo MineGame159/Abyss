@@ -64,9 +64,9 @@ public abstract class Application {
         Ctx.Vk.CreateSemaphore(Ctx.Device, new SemaphoreCreateInfo(flags: SemaphoreCreateFlags.None), null, out submitSemaphore);
 
         ImGuiImpl.Init(Ctx);
-        AbyssGui.Init(World);
+        AbyssGui.Init(Renderer, World);
 
-        World.Create(new Root(), new Info("<root>"));
+        World.Create(new Root(), new Info("<root>"), new Transform());
 
         Init();
     }

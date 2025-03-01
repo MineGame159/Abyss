@@ -33,6 +33,11 @@ public record struct Transform {
         Scale = scale;
     }
 
+    public Transform(Matrix4x4 matrix) {
+        if (!Matrix4x4.Decompose(matrix, out Scale, out Rotation, out Position))
+            throw new Exception("Failed to create a Transform from a Matrix4x4");
+    }
+
     public Transform() : this(Vector3.Zero, Quaternion.Identity, Vector3.One) { }
 
     public Matrix4x4 Matrix =>

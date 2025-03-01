@@ -27,7 +27,7 @@ public class Renderer : BaseSystem<World, float> {
         .WithAll<Transform>()
         .WithAny<PointLight, DirectionalLight>();
 
-    private readonly GpuContext ctx;
+    public readonly GpuContext Ctx;
 
     private readonly GpuGraphicsPipeline pipeline;
 
@@ -50,8 +50,11 @@ public class Renderer : BaseSystem<World, float> {
     private GpuImage output = null!;
     private GpuImage depth = null!;
 
+    public Matrix4x4 ProjectionMatrix { get; private set; }
+    public Matrix4x4 ViewMatrix { get; private set; }
+
     public Renderer(World world, GpuContext ctx) : base(world) {
-        this.ctx = ctx;
+        this.Ctx = ctx;
 
         pipeline = ctx.Pipelines.Create(new GpuGraphicsPipelineOptions(
             PrimitiveTopology.TriangleList,
@@ -90,7 +93,7 @@ public class Renderer : BaseSystem<World, float> {
         if (depth == null || depth.Size != output.Size) {
             depth?.Dispose();
 
-            depth = ctx.CreateImage(
+            depth = Ctx.CreateImage(
                 output.Size,
                 ImageUsageFlags.DepthStencilAttachmentBit,
                 Format.D32Sfloat
@@ -117,7 +120,7 @@ public class Renderer : BaseSystem<World, float> {
         // Uniforms
 
         var frameUniforms = GetFrameUniforms(out var clearColor);
-        var frameUniformsBuffer = ctx.FrameAllocator.Allocate(BufferUsageFlags.UniformBufferBit, frameUniforms);
+        var frameUniformsBuffer = Ctx.FrameAllocator.Allocate(BufferUsageFlags.UniformBufferBit, frameUniforms);
 
         // Collect lights
 
@@ -212,6 +215,10 @@ public class Renderer : BaseSystem<World, float> {
             uniforms.CameraPos = transform.Position;
 
             clearColor = camera.Environment.ClearColor;
+
+            var aspect = (float) output.Size.X / output.Size.Y;
+            ProjectionMatrix = Matrix4x4.CreatePerspectiveFieldOfView(Utils.DegToRad(camera.Fov), aspect, camera.Near, camera.Far);
+            ViewMatrix = uniforms.View;
         }
         else {
             clearColor = Vector3.One;
@@ -308,7 +315,7 @@ public class Renderer : BaseSystem<World, float> {
 
     private Mesh GetMesh(IMesh asset) {
         if (!meshes.TryGetValue(asset, out var mesh)) {
-            mesh = MeshBuilder.Create(ctx, asset);
+            mesh = MeshBuilder.Create(Ctx, asset);
             meshes[asset] = mesh;
         }
 
@@ -347,7 +354,7 @@ public class Renderer : BaseSystem<World, float> {
             return 0;
 
         if (!textureIndices.TryGetValue(asset, out var index)) {
-            var uploadBuffer = ctx.CreateBuffer(
+            var uploadBuffer = Ctx.CreateBuffer(
                 asset.Size.X * asset.Size.Y * asset.Format.Size(),
                 BufferUsageFlags.TransferSrcBit,
                 MemoryUsage.CPU_Only
@@ -357,7 +364,7 @@ public class Renderer : BaseSystem<World, float> {
             asset.Write(pixels);
             uploadBuffer.Unmap();
 
-            var image = ctx.CreateImage(
+            var image = Ctx.CreateImage(
                 asset.Size,
                 ImageUsageFlags.SampledBit | ImageUsageFlags.TransferDstBit,
                 asset.Format switch {
@@ -367,7 +374,7 @@ public class Renderer : BaseSystem<World, float> {
                 }
             );
 
-            ctx.Run(commandBuffer => {
+            Ctx.Run(commandBuffer => {
                 commandBuffer.TransitionImage(
                     image,
                     ImageLayout.TransferDstOptimal,
